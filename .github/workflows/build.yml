@@ -14,6 +14,7 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build:
@@ -48,6 +49,73 @@ jobs:
           name: ${{ github.sha }}
           path: out
           compression-level: 9
+
+      - name: Setup Git
+        run: git config --global user.email ${{ secrets.EMAIL }} && git config --global user.name pixincreate
+
+      - name: Fetch commit hash and Magisk version
+#        if: ${{ startsWith(github.event.head_commit.message, 'Release new canary build') }}
+        run: |
+          git fetch origin
+          echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          
+          echo "MAGISK_VERSION=$(grep 'magisk.versionCode=' gradle.properties | awk -F= '{print $2}')" >> $GITHUB_ENV
+          echo "MAGISK_STUB_VERSION=$(grep 'magisk.stubVersion=' gradle.properties | awk -F= '{print $2}')" >> $GITHUB_ENV
+
+      - name: Update configs
+#        if: ${{ startsWith(github.event.head_commit.message, 'Release new canary build') }}
+        run: |
+          git checkout magisk-files
+          echo "Updating Configs for the new release"
+          
+          jq --arg version "${COMMIT_HASH}" \
+            --arg versionCode "${MAGISK_VERSION}" \
+            --arg stubVersionCode "${MAGISK_STUB_VERSION}" \
+            '.magisk.version = $version |
+             .magisk.versionCode = $versionCode |
+             .stub.versionCode = $stubVersionCode' canary.json > updated_canary.json
+          mv updated_canary.json canary.json
+          
+          jq --arg version "${COMMIT_HASH}" \
+            --arg versionCode "${MAGISK_VERSION}" \
+            --arg stubVersionCode "${MAGISK_STUB_VERSION}" \
+            '.magisk.version = $version |
+             .magisk.versionCode = $versionCode |
+             .stub.versionCode = $stubVersionCode' debug.json > updated_debug.json
+          mv updated_debug.json debug.json
+          
+          git remote add upstream_server https://github.com/topjohnwu/magisk-files.git
+          git fetch upstream_server
+          git checkout upstream_server/canary notes.md
+          
+          echo -n "## Diffs to Official Magisk\nAdded support for GrapheneOS for personal use" >> notes.md
+          
+          git add canary.json debug.json notes.md
+
+      - name: Download APKs
+        #        if: ${{ startsWith(github.event.head_commit.message, 'Release new canary build') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.sha }}
+
+      - name: Upload Downloaded APKs to repo
+        run: |
+          git add app-debug.apk app-release.apk stub-debug.apk stub-release.apk
+          git commit -m "Release new canary build ${COMMIT_HASH}"
+          git push origin magisk-files
+          
+          git checkout master
+
+      - name: Release APK
+#        if: ${{ startsWith(github.event.head_commit.message, 'Release new canary build') }}
+        uses: "dciborow/action-github-releases@v1.0.1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: ${{ env.COMMIT_HASH }}
+          prerelease: true
+          title: "Magisk-v${{ env.COMMIT_HASH }}"
+          files: |
+            out/*.apk
 
       - name: Upload mapping and native debug symbols
         uses: actions/upload-artifact@v4
