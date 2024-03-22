@@ -48,7 +48,7 @@ object Const {
 
         const val GITHUB_RAW_URL = "https://raw.githubusercontent.com/"
         const val GITHUB_API_URL = "https://api.github.com/"
-        const val GITHUB_PAGE_URL = "https://topjohnwu.github.io/magisk-files/"
+        const val GITHUB_PAGE_URL = "https://pixincreate.github.io/Magisk/"
         const val JS_DELIVR_URL = "https://cdn.jsdelivr.net/gh/"
     }
 
