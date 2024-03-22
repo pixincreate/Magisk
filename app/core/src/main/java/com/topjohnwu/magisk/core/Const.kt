@@ -47,7 +47,7 @@ object Const {
         const val CHANGELOG_URL = "https://topjohnwu.github.io/Magisk/releases/${APP_VERSION_CODE}.md"
 
         const val GITHUB_API_URL = "https://api.github.com/"
-        const val GITHUB_PAGE_URL = "https://topjohnwu.github.io/magisk-files/"
+        const val GITHUB_PAGE_URL = "https://pixincreate.github.io/Magisk/"
         const val INVALID_URL = "https://example.com/"
     }
 
