@@ -4,6 +4,13 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      make_release:
+        default: false
+        description: Make a forced release
+        required: false
+        type: boolean
+  workflow_call:
 
 jobs:
   build:
@@ -15,12 +22,25 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: "recursive"
 
       - name: Setup environment
         uses: ./.github/actions/setup
         with:
           is-asset-build: true
+
+      - name: Setup keystores
+        run: |
+          cat > config.prop<< EOF
+            keyStore=key.jks
+            keyStorePass=${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+            keyAlias=${{ secrets.KEYSTORE_ALIAS_NAME }}
+            keyPass=${{ secrets.KEYSTORE_PASSWORD }}
+          EOF
+
+          echo '${{ secrets.KEYSTORE_FILE }}' > keystore.jks.asc
+          gpg -d --passphrase '${{ secrets.KEYSTORE_PASSWORD_GPG }}' --batch keystore.jks.asc > key.jks
 
       - name: Build release
         run: ./build.py -vr all
@@ -37,6 +57,88 @@ jobs:
           name: ${{ github.sha }}
           path: out
           compression-level: 9
+
+      - name: Check for Release
+        id: check_release
+        run: |
+          # fetch all once
+          git fetch --all
+
+          # Set a value for force_release if not set already
+          force_release=${{ inputs.make_release }}
+          if [ -z "$force_release" ]; then
+            force_release="false"
+          fi
+
+          NUM_RELEASES=$(git log -10 --oneline | grep 'Release new canary build' | wc -l)
+          RELEASE_COMMIT=$(( NUM_RELEASES + RELEASE_COMMIT ))
+          echo "RELEASE_COMMIT=$RELEASE_COMMIT" >> $GITHUB_ENV
+
+          if [[ "${force_release}" == "true" ]]; then
+            (( RELEASE_COMMIT += 1 ))
+            echo "RELEASE_COMMIT=$RELEASE_COMMIT" >> $GITHUB_ENV
+          fi
+
+          if [[ $RELEASE_COMMIT -gt 0 ]]; then
+            echo "Found recent canary build releases."
+          else
+            echo "No recent canary build releases found."
+          fi
+
+      - name: Setup Git
+        if: ${{ env.RELEASE_COMMIT > 0 }}
+        run: git config --global user.email ${{ secrets.EMAIL }} && git config --global user.name PiX
+
+      - name: Fetch commit hash and Magisk version
+        if: ${{ env.RELEASE_COMMIT > 0 }}
+        run: |
+          git fetch origin
+          echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          
+          echo "MAGISK_VERSION=$(grep 'magisk.versionCode=' gradle.properties | awk -F= '{print $2}')" >> $GITHUB_ENV
+
+      - name: Update configs
+        if: ${{ env.RELEASE_COMMIT > 0 }}
+        run: |
+          git checkout magisk-files
+          echo "Updating Configs for the new release"
+          
+          jq --arg version "${COMMIT_HASH}" \
+            --arg versionCode "${MAGISK_VERSION}" \
+            '.magisk.version = $version |
+             .magisk.versionCode = $versionCode |
+             .magisk.link |= sub("canary-[0-9]{5}"; "canary-" + $versionCode) |
+             .magisk.note |= sub("canary-[0-9]{5}"; "canary-" + $versionCode)' canary.json > canary.json.tmp
+          mv canary.json.tmp canary.json
+          
+          jq --arg version "${COMMIT_HASH}" \
+            --arg versionCode "${MAGISK_VERSION}" \
+            '.magisk.version = $version |
+             .magisk.versionCode = $versionCode |
+             .magisk.link |= sub("canary-[0-9]{5}"; "canary-" + $versionCode) |
+             .magisk.note |= sub("canary-[0-9]{5}"; "canary-" + $versionCode)' debug.json > debug.json.tmp
+          mv debug.json.tmp debug.json
+          
+          git add canary.json debug.json
+          git commit -m "release: new canary build ${COMMIT_HASH}"
+          git push origin magisk-files
+          git checkout master
+
+          wget -qO- "https://github.com/topjohnwu/Magisk/releases/download/canary-${MAGISK_VERSION}/notes.md" >> notes.md
+          echo -e '\n## Diffs to Official Magisk\n\nAdded support for GrapheneOS for personal use' >> notes.md
+
+      - name: Release APK
+        if: ${{ env.RELEASE_COMMIT > 0 }}
+        uses: "dciborow/action-github-releases@v1.0.1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "canary-${{ env.MAGISK_VERSION }}"
+          prerelease: true
+          title: "Magisk (${{ env.COMMIT_HASH }}) (${{ env.MAGISK_VERSION }})"
+          files: |
+            out/app-release.apk
+            out/app-debug.apk
+            notes.md
 
       - name: Upload mapping and native debug symbols
         uses: actions/upload-artifact@v4
