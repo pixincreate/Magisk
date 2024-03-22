@@ -1,0 +1,12 @@
+{
+  "magisk": {
+    "version": "f3198a0",
+    "versionCode": "27002",
+    "link": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/app-release.apk",
+    "note": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/note.md"
+  },
+  "stub": {
+    "versionCode": "39",
+    "link": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/stub-release.apk"
+  }
+}
