@@ -11,23 +11,41 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      make_release:
+        default: false
+        description: Make a forced release
+        required: false
+        type: boolean
+  workflow_call:
 
 jobs:
   build:
     name: Build Magisk artifacts
     runs-on: macos-15
-    strategy:
-      fail-fast: false
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: "recursive"
 
       - name: Setup environment
         uses: ./.github/actions/setup
         with:
           is-asset-build: true
+
+      - name: Setup keystores
+        run: |
+          cat > config.prop<< EOF
+            keyStore=key.jks
+            keyStorePass=${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+            keyAlias=${{ secrets.KEYSTORE_ALIAS_NAME }}
+            keyPass=${{ secrets.KEYSTORE_PASSWORD }}
+          EOF
+
+          echo '${{ secrets.KEYSTORE_FILE }}' > keystore.jks.asc
+          gpg -d --passphrase '${{ secrets.KEYSTORE_PASSWORD_GPG }}' --batch keystore.jks.asc > key.jks
 
       - name: Build release
         run: ./build.py -vr all
@@ -44,6 +62,127 @@ jobs:
           name: ${{ github.sha }}
           path: out
           compression-level: 9
+
+      - name: Check for Release
+        id: check_release
+        run: |
+          git fetch --all --tags
+          DO_RELEASE=false
+          IS_PRERELEASE=true
+          RELEASE_COMMIT_HASH=""
+          COMMIT_RANGE_TO_SCAN=""
+
+          # Handle forced releases from workflow_dispatch first
+          if [[ "${{ inputs.make_release }}" == "true" ]]; then
+            DO_RELEASE=true
+            RELEASE_COMMIT_HASH=${{ github.sha }}
+            echo "Forcing a pre-release due to workflow input for commit $RELEASE_COMMIT_HASH."
+          # Handle push events
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            # On a new branch or a force-push, the before..after range is often invalid.
+            # In these cases, we fall back to scanning the last N commits from HEAD.
+            if [[ "${{ github.event.created }}" == "true" || "${{ github.event.forced }}" == "true" ]]; then
+              if [[ "${{ github.event.created }}" == "true" ]]; then
+                echo "New branch detected. Scanning recent commits for a release."
+              else
+                echo "Force push detected. Scanning recent commits for a release."
+              fi
+              # Scan the history of the current HEAD. Limit to 20 to be safe.
+              COMMIT_RANGE_TO_SCAN="--max-count=20 ${{ github.sha }}"
+            else
+              # For a normal push to an existing branch, the range is reliable.
+              COMMIT_RANGE_TO_SCAN="${{ github.event.before }}..${{ github.sha }}"
+              echo "Scanning commit range: $COMMIT_RANGE_TO_SCAN"
+            fi
+
+            # The `|| true` prevents the script from exiting if git log returns a non-zero status (e.g., invalid range)
+            # Search for both "Release Magisk" and "Release new canary build" commits
+            RELEASE_COMMIT_HASH=$(git log $COMMIT_RANGE_TO_SCAN --grep="Release Magisk" --grep="Release new canary build" -E --max-count=1 --pretty=%H || true)
+
+            if [[ -n "$RELEASE_COMMIT_HASH" ]]; then
+              DO_RELEASE=true
+              echo "Found release-triggering commit in push: $RELEASE_COMMIT_HASH"
+            fi
+          fi
+
+          if [[ "$DO_RELEASE" == "true" ]]; then
+            LATEST_TAG=$(git describe --tags --exact-match $RELEASE_COMMIT_HASH 2>/dev/null || true)
+
+            # Determine if this is a stable release based on tag format
+            if [[ -n "$LATEST_TAG" && "$LATEST_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+              # Major version release (e.g., v28.1, v29.0) - not a pre-release
+              IS_PRERELEASE=false
+              echo "Detected stable release tag: $LATEST_TAG"
+            else
+              # Canary, beta, or forced releases are pre-releases
+              IS_PRERELEASE=true
+              echo "Detected pre-release tag: $LATEST_TAG (or untagged forced release)"
+            fi
+
+            echo "DO_RELEASE=true" >> $GITHUB_ENV
+            echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_ENV
+            echo "RELEASE_COMMIT_HASH=$RELEASE_COMMIT_HASH" >> $GITHUB_ENV
+            echo "RELEASE_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          else
+            echo "No release-triggering commit or input found."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Git
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: git config --global user.email ${{ secrets.EMAIL }} && git config --global user.name PiX
+
+      - name: Fetch Release Info
+        if: ${{ env.DO_RELEASE == 'true' }}
+        id: fetch_info
+        run: |
+          COMMIT_HASH=$(git rev-parse --short $RELEASE_COMMIT_HASH)
+          MAGISK_VERSION=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+          echo "MAGISK_VERSION=$MAGISK_VERSION" >> $GITHUB_ENV
+
+          # Use the tag found in the previous step, or create a fallback for untagged forced releases
+          RELEASE_TAG=${{ env.RELEASE_TAG }}
+          if [[ -z "$RELEASE_TAG" ]]; then
+            RELEASE_TAG="canary-$MAGISK_VERSION"
+          fi
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+
+          # Construct a release title
+          if [[ "$RELEASE_TAG" == v* ]]; then
+              RELEASE_TITLE="Magisk $RELEASE_TAG"
+          else
+              RELEASE_TITLE="Magisk ($COMMIT_HASH) ($MAGISK_VERSION)"
+          fi
+          echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_ENV
+
+      - name: Create Release Notes
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: |
+          # Try to extract notes from the annotated git tag of the release commit
+          if [[ -n "${{ env.RELEASE_TAG }}" ]]; then
+            git tag -l --format='%(contents)' "${{ env.RELEASE_TAG }}" > notes.md
+          fi
+          # If notes are still empty, add a placeholder
+          if [ ! -s notes.md ]; then
+            echo "This is a new build of Magisk." > notes.md
+          fi
+          echo -e '\n## Diffs to Official Magisk\n\nAdded support for GrapheneOS for personal use' >> notes.md
+          echo "Generated Release Notes:"
+          cat notes.md
+
+      - name: Release APK
+        if: ${{ env.DO_RELEASE == 'true' && env.RELEASE_TAG != '' }}
+        uses: "dciborow/action-github-releases@v1.0.1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "${{ env.RELEASE_TAG }}"
+          prerelease: ${{ env.IS_PRERELEASE }}
+          title: "${{ env.RELEASE_TITLE }}"
+          files: |
+            out/app-release.apk
+            out/app-debug.apk
+            notes.md
 
       - name: Upload mapping and native debug symbols
         uses: actions/upload-artifact@v4
