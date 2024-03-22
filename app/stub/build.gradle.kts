@@ -13,7 +13,7 @@ android {
     namespace = "com.topjohnwu.magisk"
 
     val canary = !Config.version.contains(".")
-    val base = "https://github.com/topjohnwu/Magisk/releases/download/"
+    val base = "https://github.com/pixincreate/Magisk/releases/download/"
     val url = base + "v${Config.version}/Magisk-v${Config.version}.apk"
     val canaryUrl = base + "canary-${Config.versionCode}/"
 
