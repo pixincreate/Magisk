@@ -11,23 +11,43 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      make_release:
+        default: false
+        description: Make a forced release
+        required: false
+        type: boolean
+  workflow_call:
 
 jobs:
   build:
     name: Build Magisk artifacts
     runs-on: macos-15
-    strategy:
-      fail-fast: false
+    permissions:
+      contents: write
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: "recursive"
 
       - name: Setup environment
         uses: ./.github/actions/setup
         with:
           is-asset-build: true
+
+      - name: Setup keystores
+        run: |
+          cat > config.prop<< EOF
+            keyStore=key.jks
+            keyStorePass=${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+            keyAlias=${{ secrets.KEYSTORE_ALIAS_NAME }}
+            keyPass=${{ secrets.KEYSTORE_PASSWORD }}
+          EOF
+
+          echo '${{ secrets.KEYSTORE_FILE }}' > keystore.jks.asc
+          gpg -d --passphrase '${{ secrets.KEYSTORE_PASSWORD_GPG }}' --batch keystore.jks.asc > key.jks
 
       - name: Build release
         run: ./build.py -vr all
@@ -44,6 +64,174 @@ jobs:
           name: ${{ github.sha }}
           path: out
           compression-level: 9
+
+      - name: Check for Release
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --all --tags
+
+          # Handle forced releases from workflow_dispatch first
+          if [[ "${{ inputs.make_release }}" == "true" ]]; then
+            echo "Forcing release due to workflow_dispatch input."
+
+            # Get current version from gradle.properties
+            CURRENT_VERSION_CODE=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+
+            if [[ -z "$CURRENT_VERSION_CODE" ]]; then
+              echo "Error: Unable to read version code from gradle.properties"
+              echo "DO_RELEASE=false" >> $GITHUB_ENV
+              exit 1
+            fi
+
+            CURRENT_VERSION=$(echo - | awk "{ printf \"%.1f\", $CURRENT_VERSION_CODE / 1000 }")
+            RELEASE_TAG="v${CURRENT_VERSION}"
+
+            echo "Creating forced release with tag: $RELEASE_TAG (versionCode: $CURRENT_VERSION_CODE)"
+            echo "DO_RELEASE=true" >> $GITHUB_ENV
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+            echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Only check for releases on push events
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            echo "Skipping release check for non-push event."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Fetch latest release from upstream (topjohnwu/Magisk)
+          echo "Checking for new releases from upstream..."
+          UPSTREAM_RELEASE=$(gh release list -R topjohnwu/Magisk -L 1 --json tagName,isPrerelease,isDraft --jq '.[0] | select(.isDraft == false)' 2>&1 || echo "")
+
+          if [[ -z "$UPSTREAM_RELEASE" ]]; then
+            echo "No upstream releases found."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Parse JSON with error handling
+          UPSTREAM_TAG=$(echo "$UPSTREAM_RELEASE" | jq -r '.tagName' 2>/dev/null || echo "")
+          UPSTREAM_IS_PRERELEASE=$(echo "$UPSTREAM_RELEASE" | jq -r '.isPrerelease' 2>/dev/null || echo "false")
+
+          # Validate tag format (should be vX.Y or vX.Y.Z)
+          if [[ ! "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Invalid or unexpected upstream tag format: '$UPSTREAM_TAG'. Skipping."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          echo "Latest upstream release: $UPSTREAM_TAG (prerelease: $UPSTREAM_IS_PRERELEASE)"
+
+          # Check if this fork already has this release
+          FORK_HAS_RELEASE=$(gh release view "$UPSTREAM_TAG" 2>/dev/null && echo "true" || echo "false")
+
+          if [[ "$FORK_HAS_RELEASE" == "true" ]]; then
+            echo "Fork already has release $UPSTREAM_TAG. Skipping."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Extract version from upstream tag (e.g., v30.6 -> 30.6)
+          UPSTREAM_VERSION=$(echo "$UPSTREAM_TAG" | sed 's/^v//')
+
+          # Calculate expected version code (version * 1000, matching upstream's release.sh)
+          EXPECTED_VERSION_CODE=$(echo - | awk "{ print int($UPSTREAM_VERSION * 1000) }")
+
+          # Get current version code from gradle.properties
+          CURRENT_VERSION_CODE=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+
+          # Validate version codes are not empty
+          if [[ -z "$CURRENT_VERSION_CODE" || -z "$EXPECTED_VERSION_CODE" ]]; then
+            echo "Error: Unable to determine version codes (current='$CURRENT_VERSION_CODE', expected='$EXPECTED_VERSION_CODE')"
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Use integer comparison to handle potential edge cases like leading zeros
+          if [[ "$CURRENT_VERSION_CODE" -ne "$EXPECTED_VERSION_CODE" ]]; then
+            echo "Version mismatch: current versionCode=$CURRENT_VERSION_CODE, expected=$EXPECTED_VERSION_CODE for $UPSTREAM_TAG"
+            echo "Code needs to be synced with upstream release first."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # All checks passed - create release for this fork
+          echo "Upstream has new release: $UPSTREAM_TAG"
+          echo "Fork doesn't have this release yet"
+          echo "Version code matches: $CURRENT_VERSION_CODE"
+          echo ""
+          echo "Creating new release for $UPSTREAM_TAG"
+
+          echo "DO_RELEASE=true" >> $GITHUB_ENV
+          echo "IS_PRERELEASE=$UPSTREAM_IS_PRERELEASE" >> $GITHUB_ENV
+          echo "RELEASE_TAG=$UPSTREAM_TAG" >> $GITHUB_ENV
+
+      - name: Setup Git
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: git config --global user.email ${{ secrets.EMAIL }} && git config --global user.name PiX
+
+      - name: Fetch Release Info
+        if: ${{ env.DO_RELEASE == 'true' }}
+        id: fetch_info
+        run: |
+          # Extract version information
+          RELEASE_TAG=${{ env.RELEASE_TAG }}
+          MAGISK_VERSION=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+
+          echo "MAGISK_VERSION=$MAGISK_VERSION" >> $GITHUB_ENV
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+
+          # Construct release title following upstream format
+          RELEASE_TITLE="Magisk $RELEASE_TAG"
+          echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_ENV
+
+          echo "Release Info:"
+          echo "  Tag: $RELEASE_TAG"
+          echo "  Title: $RELEASE_TITLE"
+          echo "  Version Code: $MAGISK_VERSION"
+          echo "  Commit: $COMMIT_HASH"
+
+      - name: Create Release Notes
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: |
+          # Try to extract notes from the annotated git tag of the release commit
+          if [[ -n "${{ env.RELEASE_TAG }}" ]]; then
+            git tag -l --format='%(contents)' "${{ env.RELEASE_TAG }}" > notes.md
+          fi
+          # If notes are still empty, add a placeholder
+          if [ ! -s notes.md ]; then
+            echo "This is a new build of Magisk." > notes.md
+          fi
+          echo -e '\n## Diffs to Official Magisk\n\nAdded support for GrapheneOS for personal use' >> notes.md
+          echo -e '\n## Verification\n\nTo verify the integrity of the APK files, download `SHA256SUMS` and run:\n```bash\nshasum -a 256 -c SHA256SUMS\n```' >> notes.md
+          echo "Generated Release Notes:"
+          cat notes.md
+
+      - name: Generate Checksums
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: |
+          cd out
+          shasum -a 256 app-release.apk app-debug.apk > SHA256SUMS
+          echo "Generated SHA256 checksums:"
+          cat SHA256SUMS
+
+      - name: Release APK
+        if: ${{ env.DO_RELEASE == 'true' && env.RELEASE_TAG != '' }}
+        uses: "dciborow/action-github-releases@v1.0.1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "${{ env.RELEASE_TAG }}"
+          prerelease: ${{ env.IS_PRERELEASE }}
+          title: "${{ env.RELEASE_TITLE }}"
+          files: |
+            out/app-release.apk
+            out/app-debug.apk
+            out/SHA256SUMS
+            notes.md
 
       - name: Upload mapping and native debug symbols
         uses: actions/upload-artifact@v4
