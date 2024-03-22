@@ -11,6 +11,13 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      make_release:
+        default: false
+        description: Make a forced release
+        required: false
+        type: boolean
+  workflow_call:
 
 jobs:
   build:
@@ -18,16 +25,31 @@ jobs:
     runs-on: macos-26
     strategy:
       fail-fast: false
+    permissions:
+      contents: write
     steps:
       - name: Check out
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           submodules: "recursive"
 
       - name: Setup environment
         uses: ./.github/actions/setup
         with:
           is-asset-build: true
+
+      - name: Setup keystores
+        run: |
+          cat > config.prop<< EOF
+            keyStore=key.jks
+            keyStorePass=${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+            keyAlias=${{ secrets.KEYSTORE_ALIAS_NAME }}
+            keyPass=${{ secrets.KEYSTORE_PASSWORD }}
+          EOF
+
+          echo '${{ secrets.KEYSTORE_FILE }}' > keystore.jks.asc
+          gpg -d --passphrase '${{ secrets.KEYSTORE_PASSWORD_GPG }}' --batch keystore.jks.asc > key.jks
 
       - name: Build release
         run: ./build.py -vr all
@@ -44,6 +66,161 @@ jobs:
           name: ${{ github.sha }}
           path: out
           compression-level: 9
+
+      - name: Check for Release
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --all --tags
+
+          # Handle forced releases from workflow_dispatch first
+          if [[ "${{ inputs.make_release }}" == "true" ]]; then
+            echo "Forcing release due to workflow_dispatch input."
+
+            # Get current version from gradle.properties
+            CURRENT_VERSION_CODE=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+
+            if [[ -z "$CURRENT_VERSION_CODE" ]]; then
+              echo "Error: Unable to read version code from gradle.properties"
+              echo "DO_RELEASE=false" >> $GITHUB_ENV
+              exit 1
+            fi
+
+            CURRENT_VERSION=$(echo - | awk "{ printf \"%.1f\", $CURRENT_VERSION_CODE / 1000 }")
+            RELEASE_TAG="v${CURRENT_VERSION}"
+
+            echo "Creating forced release with tag: $RELEASE_TAG (versionCode: $CURRENT_VERSION_CODE)"
+            echo "DO_RELEASE=true" >> $GITHUB_ENV
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+            echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Only check for releases on push events
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            echo "Skipping release check for non-push event."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Ask GitHub for upstream's latest release (includes prereleases)
+          read -r UPSTREAM_TAG UPSTREAM_IS_PRERELEASE < <(gh release list -R topjohnwu/Magisk -L 1 \
+            --json tagName,isPrerelease --jq '.[] | [.tagName, .isPrerelease] | @tsv') || true
+
+          if [[ -z "$UPSTREAM_TAG" ]]; then
+            echo "Unable to determine upstream's latest release."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          echo "Latest upstream release: $UPSTREAM_TAG (prerelease: $UPSTREAM_IS_PRERELEASE)"
+
+          # Skip if the fork already published this release
+          if gh release view "$UPSTREAM_TAG" &>/dev/null; then
+            echo "Fork already has release $UPSTREAM_TAG. Skipping."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Skip if the release commit is not in fork master yet; the next
+          # fork update rebases it in and re-triggers this workflow
+          UPSTREAM_TAG_COMMIT=$(git ls-remote https://github.com/topjohnwu/Magisk.git \
+            "refs/tags/$UPSTREAM_TAG" "refs/tags/$UPSTREAM_TAG^{}" | tail -1 | cut -f1)
+          if [[ -z "$UPSTREAM_TAG_COMMIT" ]] || ! git merge-base --is-ancestor "$UPSTREAM_TAG_COMMIT" HEAD 2>/dev/null; then
+            echo "Release $UPSTREAM_TAG commit is not in fork master yet. Sync first. Skipping."
+            echo "DO_RELEASE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Fetch the annotated tag locally so the release notes step can
+          # read its message. Do not push it to the fork: GITHUB_TOKEN may
+          # not push refs whose tree changes .github/workflows, and the
+          # upstream tag's tree carries upstream's workflow files. The
+          # release step creates the fork's own tag instead.
+          git fetch https://github.com/topjohnwu/Magisk.git "refs/tags/$UPSTREAM_TAG:refs/tags/$UPSTREAM_TAG" || true
+
+          echo "Creating new release for $UPSTREAM_TAG"
+          echo "DO_RELEASE=true" >> $GITHUB_ENV
+          echo "IS_PRERELEASE=$UPSTREAM_IS_PRERELEASE" >> $GITHUB_ENV
+          echo "RELEASE_TAG=$UPSTREAM_TAG" >> $GITHUB_ENV
+
+      - name: Setup Git
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: git config --global user.email ${{ secrets.EMAIL }} && git config --global user.name PiX
+
+      - name: Fetch Release Info
+        if: ${{ env.DO_RELEASE == 'true' }}
+        id: fetch_info
+        run: |
+          # Extract version information
+          RELEASE_TAG=${{ env.RELEASE_TAG }}
+          MAGISK_VERSION=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+
+          echo "MAGISK_VERSION=$MAGISK_VERSION" >> $GITHUB_ENV
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+
+          # Construct release title following upstream format
+          RELEASE_TITLE="Magisk $RELEASE_TAG"
+          echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_ENV
+
+          echo "Release Info:"
+          echo "  Tag: $RELEASE_TAG"
+          echo "  Title: $RELEASE_TITLE"
+          echo "  Version Code: $MAGISK_VERSION"
+          echo "  Commit: $COMMIT_HASH"
+
+      - name: Create Release Notes
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: |
+          # Try to extract notes from the annotated git tag of the release commit
+          if [[ -n "${{ env.RELEASE_TAG }}" ]]; then
+            git tag -l --format='%(contents)' "${{ env.RELEASE_TAG }}" > notes.md
+          fi
+          # If notes are still empty, add a placeholder
+          if [ ! -s notes.md ]; then
+            echo "This is a new build of Magisk." > notes.md
+          fi
+          echo -e '\n## Diffs to Official Magisk\n\nAdded support for GrapheneOS for personal use' >> notes.md
+          echo -e '\n## Verification\n\nTo verify the integrity of the APK files, download `SHA256SUMS` and run:\n```bash\nshasum -a 256 -c SHA256SUMS\n```' >> notes.md
+          echo "Generated Release Notes:"
+          cat notes.md
+
+      - name: Generate Checksums
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: |
+          cd out
+          cp app-release.apk "Magisk-${{ env.RELEASE_TAG }}.apk"
+          shasum -a 256 "Magisk-${{ env.RELEASE_TAG }}.apk" app-debug.apk > SHA256SUMS
+          echo "Generated SHA256 checksums:"
+          cat SHA256SUMS
+
+      - name: Release APK
+        if: ${{ env.DO_RELEASE == 'true' && env.RELEASE_TAG != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Remove stale release for this tag on reruns; keep the tag itself
+          gh release delete "${{ env.RELEASE_TAG }}" --yes --cleanup-tag=false || true
+
+          # Draft-first: assets attach while mutable, then publish atomically.
+          # Safe under immutable releases (drafts aren't locked until publish).
+          # --target creates the fork's own tag at the built commit; CI
+          # cannot push upstream's tag (see the release check step), and
+          # without --target gh refuses because the locally fetched tag is
+          # not on the remote
+          gh release create "${{ env.RELEASE_TAG }}" \
+            --target "${{ github.sha }}" \
+            --draft \
+            --prerelease="${{ env.IS_PRERELEASE }}" \
+            --title "${{ env.RELEASE_TITLE }}" \
+            --notes-file notes.md \
+            "out/Magisk-${{ env.RELEASE_TAG }}.apk" \
+            "out/app-debug.apk" \
+            "out/SHA256SUMS"
+
+          gh release edit "${{ env.RELEASE_TAG }}" --draft=false
 
       - name: Upload mapping and native debug symbols
         uses: actions/upload-artifact@v7
