@@ -11,6 +11,18 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      make_release:
+        default: false
+        description: Make a forced release
+        required: false
+        type: boolean
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Fork commit after upstream synchronization
+        required: false
+        type: string
 
 jobs:
   build:
@@ -18,16 +30,137 @@ jobs:
     runs-on: macos-26
     strategy:
       fail-fast: false
+    permissions:
+      contents: write
     steps:
       - name: Check out
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 0
           submodules: "recursive"
+
+      - name: Check for upstream release
+        if: ${{ inputs.make_release || (github.event_name != 'pull_request' && github.ref == 'refs/heads/master') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAKE_RELEASE: ${{ inputs.make_release }}
+        run: |
+          # Forced releases use the selected fork commit, without upstream release detection.
+          if [[ "$MAKE_RELEASE" == "true" ]]; then
+            git fetch origin --tags
+            CURRENT_VERSION_CODE=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+            if [[ -z "$CURRENT_VERSION_CODE" ]]; then
+              echo "Error: Unable to read version code from gradle.properties."
+              exit 1
+            fi
+            CURRENT_VERSION=$(echo - | awk "{ printf \"%.1f\", $CURRENT_VERSION_CODE / 1000 }")
+            RELEASE_TAG="v${CURRENT_VERSION}"
+            n=1
+            while git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; do
+              n=$((n + 1))
+              RELEASE_TAG="v${CURRENT_VERSION}-$n"
+            done
+            {
+              echo "DO_RELEASE=true"
+              echo "FORCE_RELEASE=true"
+              echo "IS_PRERELEASE=true"
+              echo "RELEASE_TAG=$RELEASE_TAG"
+            } >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          # Include beta releases. API failures must stop publication.
+          upstream_release=$(gh release list -R topjohnwu/Magisk -L 1 --exclude-drafts \
+            --json tagName,isPrerelease --jq '.[] | [.tagName, .isPrerelease] | @tsv')
+          if [[ -z "$upstream_release" ]]; then
+            echo "Upstream has no published release. Building without publication."
+            exit 0
+          fi
+          read -r UPSTREAM_TAG UPSTREAM_IS_PRERELEASE <<< "$upstream_release"
+          git check-ref-format "refs/tags/$UPSTREAM_TAG"
+
+          published_tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft == false) | .tag_name')
+          if grep -Fxq -- "$UPSTREAM_TAG" <<< "$published_tags"; then
+            echo "Fork already publishes $UPSTREAM_TAG. Building without publication."
+            exit 0
+          fi
+
+          echo '/tools/futility binary' >> .git/info/attributes
+          # Do not import upstream tags into the fork's release-tag namespace.
+          git fetch --no-tags https://github.com/topjohnwu/Magisk.git \
+            '+refs/heads/master:refs/remotes/upstream/master' \
+            "+refs/tags/$UPSTREAM_TAG:refs/ci/upstream-release"
+          {
+            echo "DO_RELEASE=true"
+            echo "RELEASE_TAG=$UPSTREAM_TAG"
+            echo "IS_PRERELEASE=$UPSTREAM_IS_PRERELEASE"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup release Git identity
+        if: ${{ env.DO_RELEASE == 'true' }}
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+        run: |
+          git config user.email "$EMAIL"
+          git config user.name PiX
+
+      - name: Prepare build source
+        run: |
+          if [[ "${DO_RELEASE:-false}" == "true" && "${FORCE_RELEASE:-false}" != "true" ]]; then
+            fork=$(git rev-parse HEAD)
+            base=$(git merge-base "$fork" refs/remotes/upstream/master)
+            release=$(git rev-parse 'refs/ci/upstream-release^{commit}')
+            if [[ "$base" == "$fork" ]] || [[ -n "$(git rev-list --merges "$base..$fork")" ]]; then
+              echo "Error: The fork must contain a linear patch stack above upstream."
+              exit 1
+            fi
+
+            # Keep master unchanged and exclude upstream commits after the release.
+            git checkout --detach "$fork"
+            if [[ "$base" != "$release" ]]; then
+              git -c commit.gpgsign=false rebase --reapply-cherry-picks --empty=keep \
+                --onto "$release" "$base"
+            fi
+            if ! git diff --quiet "$fork" HEAD -- .github/workflows; then
+              echo "Error: Release workflows differ from fork master. Resolve them before publication."
+              exit 1
+            fi
+
+            # Reuse a tag left by a failed run only if it matches the release source.
+            existing_tag=$(git ls-remote origin "refs/tags/$RELEASE_TAG")
+            if [[ -n "$existing_tag" ]]; then
+              git fetch --no-tags origin "+refs/tags/$RELEASE_TAG:refs/ci/fork-release"
+              tagged=$(git rev-parse 'refs/ci/fork-release^{commit}')
+              if [[ "$(git merge-base "$tagged" refs/remotes/upstream/master)" != "$release" ]] \
+                || ! git diff --quiet HEAD "$tagged"; then
+                echo "Error: The existing fork tag does not match the patched upstream release."
+                exit 1
+              fi
+              git checkout --detach "$tagged"
+              echo "FORK_TAG_EXISTS=true" >> "$GITHUB_ENV"
+            fi
+          fi
+          git submodule update --init --recursive
+          echo "BUILD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Setup environment
         uses: ./.github/actions/setup
         with:
           is-asset-build: true
+
+      - name: Setup keystores
+        run: |
+          cat > config.prop<< EOF
+            keyStore=key.jks
+            keyStorePass=${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
+            keyAlias=${{ secrets.KEYSTORE_ALIAS_NAME }}
+            keyPass=${{ secrets.KEYSTORE_PASSWORD }}
+          EOF
+
+          echo '${{ secrets.KEYSTORE_FILE }}' > keystore.jks.asc
+          gpg -d --passphrase '${{ secrets.KEYSTORE_PASSWORD_GPG }}' --batch keystore.jks.asc > key.jks
 
       - name: Build release
         run: ./build.py -vr all
@@ -44,6 +177,81 @@ jobs:
           name: ${{ github.sha }}
           path: out
           compression-level: 9
+
+      - name: Fetch Release Info
+        if: ${{ env.DO_RELEASE == 'true' }}
+        id: fetch_info
+        run: |
+          # Extract version information
+          RELEASE_TAG=${{ env.RELEASE_TAG }}
+          MAGISK_VERSION=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+
+          echo "MAGISK_VERSION=$MAGISK_VERSION" >> $GITHUB_ENV
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+
+          # Construct release title following upstream format
+          RELEASE_TITLE="Magisk $RELEASE_TAG"
+          echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_ENV
+
+          echo "Release Info:"
+          echo "  Tag: $RELEASE_TAG"
+          echo "  Title: $RELEASE_TITLE"
+          echo "  Version Code: $MAGISK_VERSION"
+          echo "  Commit: $COMMIT_HASH"
+
+      - name: Create Release Notes
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: |
+          git for-each-ref --format='%(contents)' refs/ci/upstream-release > notes.md
+          # If notes are still empty, add a placeholder
+          if [ ! -s notes.md ]; then
+            echo "This is a new build of Magisk." > notes.md
+          fi
+          echo -e '\n## Diffs to Official Magisk\n\nAdded support for GrapheneOS for personal use' >> notes.md
+          echo -e '\n## Verification\n\nTo verify the integrity of the APK files, download `SHA256SUMS` and run:\n```bash\nshasum -a 256 -c SHA256SUMS\n```' >> notes.md
+          echo "Generated Release Notes:"
+          cat notes.md
+
+      - name: Generate Checksums
+        if: ${{ env.DO_RELEASE == 'true' }}
+        run: |
+          cd out
+          cp app-release.apk "Magisk-${{ env.RELEASE_TAG }}.apk"
+          shasum -a 256 "Magisk-${{ env.RELEASE_TAG }}.apk" app-debug.apk > SHA256SUMS
+          echo "Generated SHA256 checksums:"
+          cat SHA256SUMS
+
+      - name: Release APK
+        if: ${{ env.DO_RELEASE == 'true' && env.RELEASE_TAG != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Remove only this release's draft after a failed publication.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft) | [.id, .tag_name] | @tsv' |
+          while IFS=$'\t' read -r id tag; do
+            if [[ "$tag" == "$RELEASE_TAG" ]]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+            fi
+          done
+
+          # Upload the built commit before the release API uses its tag.
+          # Never push the upstream tag or replace an existing fork tag.
+          if [[ "${FORK_TAG_EXISTS:-false}" != "true" ]]; then
+            git push origin "$BUILD_SHA:refs/tags/$RELEASE_TAG"
+          fi
+          gh release create "${{ env.RELEASE_TAG }}" \
+            --verify-tag \
+            --draft \
+            --prerelease="${{ env.IS_PRERELEASE }}" \
+            --title "${{ env.RELEASE_TITLE }}" \
+            --notes-file notes.md \
+            "out/Magisk-${{ env.RELEASE_TAG }}.apk" \
+            "out/app-debug.apk" \
+            "out/SHA256SUMS"
+
+          gh release edit "${{ env.RELEASE_TAG }}" --draft=false
 
       - name: Upload mapping and native debug symbols
         uses: actions/upload-artifact@v7
