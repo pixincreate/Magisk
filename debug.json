@@ -1,12 +1,12 @@
 {
   "magisk": {
-    "version": "97c99326b",
-    "versionCode": "27003",
+    "version": "27d96c424",
+    "versionCode": "27004",
     "link": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/app-debug.apk",
     "note": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/notes.md"
   },
   "stub": {
-    "versionCode": "39",
+    "versionCode": "40",
     "link": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/stub-debug.apk"
   }
 }
