@@ -90,6 +90,7 @@ jintArray = JArray(jint)
 jstring = JType("jstring", "Ljava/lang/String;")
 jboolean = JType("jboolean", "Z")
 jlong = JType("jlong", "J")
+jlongArray = JArray(jlong)
 void = JType("void", "V")
 
 
@@ -410,6 +411,61 @@ fas_samsung_p = ForkApp(
     ],
 )
 
+# GrapheneOS U (without use_fifo_ui - for older versions)
+fas_grapheneos_u = ForkApp(
+    "grapheneos_u",
+    [
+        uid,
+        gid,
+        gids,
+        runtime_flags,
+        rlimits,
+        mount_external,
+        se_info,
+        nice_name,
+        fds_to_close,
+        fds_to_ignore,
+        is_child_zygote,
+        instruction_set,
+        app_data_dir,
+        is_top_app,
+        pkg_data_info_list,
+        whitelisted_data_info_list,
+        mount_data_dirs,
+        mount_storage_dirs,
+        mount_sysprop_overrides,
+        Anon(jlongArray),
+    ],
+)
+
+# GrapheneOS B (with use_fifo_ui - for QPR2 and newer)
+fas_grapheneos_b = ForkApp(
+    "grapheneos_b",
+    [
+        uid,
+        gid,
+        gids,
+        runtime_flags,
+        rlimits,
+        mount_external,
+        se_info,
+        nice_name,
+        fds_to_close,
+        fds_to_ignore,
+        is_child_zygote,
+        instruction_set,
+        app_data_dir,
+        is_top_app,
+        use_fifo_ui,
+        pkg_data_info_list,
+        whitelisted_data_info_list,
+        mount_data_dirs,
+        mount_storage_dirs,
+        mount_sysprop_overrides,
+        Anon(jlongArray),
+    ],
+)
+
 fas_nubia_u = ForkApp(
     "nubia_u",
     [
@@ -559,6 +615,30 @@ spec_samsung_q = SpecializeApp(
     ],
 )
 
+spec_grapheneos_u = SpecializeApp(
+    "grapheneos_u",
+    [
+        uid,
+        gid,
+        gids,
+        runtime_flags,
+        rlimits,
+        mount_external,
+        se_info,
+        nice_name,
+        is_child_zygote,
+        instruction_set,
+        app_data_dir,
+        is_top_app,
+        pkg_data_info_list,
+        whitelisted_data_info_list,
+        mount_data_dirs,
+        mount_storage_dirs,
+        mount_sysprop_overrides,
+        Anon(jlongArray),
+    ],
+)
+
 spec_nubia_u = SpecializeApp(
     "nubia_u",
     [
@@ -611,6 +691,19 @@ server_samsung_q = ForkServer(
     ],
 )
 
+server_grapheneos_u = ForkServer(
+    "grapheneos_u",
+    [
+        uid,
+        gid,
+        gids,
+        runtime_flags,
+        rlimits,
+        permitted_capabilities,
+        effective_capabilities,
+    ],
+)
+
 
 def gen_jni_def(field: str, methods: list[JNIHook]):
     decl = ""
@@ -652,6 +745,8 @@ with open("jni_hooks.hpp", "w") as f:
                 fas_samsung_n,
                 fas_samsung_o,
                 fas_samsung_p,
+                fas_grapheneos_u,
+                fas_grapheneos_b,
                 fas_nubia_u,
             ],
         )
@@ -660,10 +755,23 @@ with open("jni_hooks.hpp", "w") as f:
     f.write(
         gen_jni_def(
             "specialize_app_methods",
-            [spec_q, spec_q_alt, spec_r, spec_u, spec_xr_u, spec_samsung_q, spec_nubia_u],
+            [
+                spec_q,
+                spec_q_alt,
+                spec_r,
+                spec_u,
+                spec_xr_u,
+                spec_samsung_q,
+                spec_grapheneos_u,
+                spec_nubia_u,
+            ],
         )
     )
 
-    f.write(gen_jni_def("fork_server_methods", [server_l, server_samsung_q]))
+    f.write(
+        gen_jni_def(
+            "fork_server_methods", [server_l, server_samsung_q, server_grapheneos_u]
+        )
+    )
 
     f.write("\n};\n")
