@@ -2,11 +2,7 @@
   "magisk": {
     "version": "ccf0d222d",
     "versionCode": "27004",
-    "link": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/app-debug.apk",
-    "note": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/notes.md"
-  },
-  "stub": {
-    "versionCode": "40",
-    "link": "https://cdn.jsdelivr.net/gh/pixincreate/Magisk@magisk-files/stub-debug.apk"
+    "link": "https://github.com/pixincretae/Magisk/releases/download/canary-27004/app-release.apk",
+    "note": "https://github.com/pixincreate/Magisk/releases/download/canary-27004/notes.md"
   }
 }
