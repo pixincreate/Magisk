@@ -1,8 +1,8 @@
 {
   "magisk": {
-    "version": "d6b94643d",
-    "versionCode": "27006",
-    "link": "https://github.com/pixincreate/Magisk/releases/download/canary-27006/app-release.apk",
-    "note": "https://github.com/pixincreate/Magisk/releases/download/canary-27006/notes.md"
+    "version": "d32d0f5bd",
+    "versionCode": "27007",
+    "link": "https://github.com/pixincreate/Magisk/releases/download/canary-27007/app-release.apk",
+    "note": "https://github.com/pixincreate/Magisk/releases/download/canary-27007/notes.md"
   }
 }
