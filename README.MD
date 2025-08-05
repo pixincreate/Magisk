@@ -1,3 +1,13 @@
+# DISCLAIMER
+
+THIS IS A FORK OF MAGISK THAT FIXES ZYGISK ON GRAPHENEOS.
+
+BY USING THIS FORK, YOU AGREE THAT YOU TRUST THE AUTHOR OF THIS FORK AND THAT YOU WILL NOT HOLD THE AUTHOR RESPONSIBLE FOR ANY DAMAGES OR LOSSES INCURRED AS A RESULT OF USING THIS FORK.
+
+MAKE SURE THAT YOU HAVE CHECKED THE SOURCE CODE AND UNDERSTAND WHAT IT DOES BEFORE USING IT.
+
+---
+
 ![](docs/images/logo.png)
 
 [![Downloads](https://img.shields.io/badge/dynamic/json?color=green&label=Downloads&query=totalString&url=https%3A%2F%2Fraw.githubusercontent.com%2Ftopjohnwu%2Fmagisk-files%2Fcount%2Fcount.json&cacheSeconds=1800)](https://raw.githubusercontent.com/topjohnwu/magisk-files/count/count.json)
