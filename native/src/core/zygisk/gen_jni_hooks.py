@@ -425,6 +425,7 @@ fas_grapheneos_u = ForkApp(
         instruction_set,
         app_data_dir,
         is_top_app,
+        Anon(jboolean),  # use_fifo_ui
         pkg_data_info_list,
         whitelisted_data_info_list,
         mount_data_dirs,
