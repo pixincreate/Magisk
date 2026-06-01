@@ -95,6 +95,9 @@ class InstallViewModel(svc: NetworkService, markwon: Markwon) : BaseViewModel() 
     }
 
     fun install() {
+        if (Info.isBootloaderLocked &&
+            (method == R.id.method_direct || method == R.id.method_inactive_slot)
+        ) return
         when (method) {
             R.id.method_patch -> FlashFragment.patch(data.value!!).navigate(true)
             R.id.method_download -> FlashFragment.download(data.value!!).navigate(true)
@@ -118,7 +121,9 @@ class InstallViewModel(svc: NetworkService, markwon: Markwon) : BaseViewModel() 
 
     override fun onRestoreState(state: Bundle) {
         state.getParcelable<InstallState>(INSTALL_STATE_KEY)?.let {
-            methodId = it.method
+            methodId = if (Info.isBootloaderLocked &&
+                (it.method == R.id.method_direct || it.method == R.id.method_inactive_slot)
+            ) -1 else it.method
             step = it.step
             Config.keepVerity = it.keepVerity
             Config.keepEnc = it.keepEnc
