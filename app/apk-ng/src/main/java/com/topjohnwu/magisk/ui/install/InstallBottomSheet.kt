@@ -130,7 +130,7 @@ fun InstallBottomSheet(
                     },
                 )
 
-                if (installVm.isRooted) {
+                if (installVm.isRooted && !installVm.isBootloaderLocked) {
                     SettingsArrow(
                         title = stringResource(CoreR.string.direct_install),
                         summary = stringResource(CoreR.string.direct_install_summary),

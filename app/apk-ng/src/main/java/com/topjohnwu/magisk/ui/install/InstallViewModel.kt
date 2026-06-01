@@ -38,8 +38,9 @@ class InstallViewModel(svc: NetworkService) : BaseViewModel() {
     )
 
     val isRooted get() = Info.isRooted
+    val isBootloaderLocked get() = Info.isBootloaderLocked
     val skipOptions = Info.isEmulator || (Info.isSAR && !Info.isFDE && Info.ramdisk)
-    val noSecondSlot = !isRooted || !Info.isAB || Info.isEmulator
+    val noSecondSlot = !isRooted || !Info.isAB || Info.isEmulator || isBootloaderLocked
 
     private val _uiState = MutableStateFlow(UiState(step = if (skipOptions) 1 else 0))
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -114,6 +115,9 @@ class InstallViewModel(svc: NetworkService) : BaseViewModel() {
     }
 
     fun install() {
+        if (isBootloaderLocked &&
+            (_uiState.value.method == Method.DIRECT || _uiState.value.method == Method.INACTIVE_SLOT)
+        ) return
         when (_uiState.value.method) {
             Method.PATCH -> navigateTo(Route.Flash(
                 action = Const.Value.PATCH_FILE,
