@@ -60,6 +60,13 @@ object Info {
             || getProperty("ro.kernel.qemu", "0") == "1"
             || getProperty("ro.boot.qemu", "0") == "1"
 
+    @JvmStatic val isBootloaderLocked: Boolean
+        get() {
+            val state = getProperty("ro.boot.vbmeta.device_state", "")
+            if (state.isNotEmpty()) return state == "locked"
+            return getProperty("ro.boot.flash.locked", "0") == "1"
+        }
+
     val isConnected = MutableLiveData(false)
 
     val showSuperUser: Boolean get() {

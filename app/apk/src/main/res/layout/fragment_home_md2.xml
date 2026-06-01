@@ -114,7 +114,7 @@
 
             <Button
                 style="@style/WidgetFoundation.Button.Outlined.Error"
-                goneUnless="@{Info.env.isActive}"
+                gone="@{!Info.env.isActive || Info.isBootloaderLocked}"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/l1"
