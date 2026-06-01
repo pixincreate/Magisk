@@ -38,8 +38,9 @@ import com.topjohnwu.magisk.core.R as CoreR
 class InstallViewModel(svc: NetworkService, markwon: Markwon) : BaseViewModel() {
 
     val isRooted get() = Info.isRooted
+    val isBootloaderLocked get() = Info.isBootloaderLocked
     val skipOptions = Info.isEmulator || (Info.isSAR && !Info.isFDE && Info.ramdisk)
-    val noSecondSlot = !isRooted || !Info.isAB || Info.isEmulator
+    val noSecondSlot = !isRooted || !Info.isAB || Info.isEmulator || isBootloaderLocked
 
     @get:Bindable
     var step = if (skipOptions) 1 else 0
