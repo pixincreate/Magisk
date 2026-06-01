@@ -115,6 +115,9 @@ class InstallViewModel(svc: NetworkService) : BaseViewModel() {
     }
 
     fun install() {
+        if (isBootloaderLocked &&
+            (_uiState.value.method == Method.DIRECT || _uiState.value.method == Method.INACTIVE_SLOT)
+        ) return
         when (_uiState.value.method) {
             Method.PATCH -> navigateTo(Route.Flash(
                 action = Const.Value.PATCH_FILE,
