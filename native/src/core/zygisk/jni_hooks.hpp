@@ -254,7 +254,7 @@ std::array<JNINativeMethod, 15> fork_app_methods = {{
     {
         "nativeForkAndSpecialize",
         "([JII[II[[IILjava/lang/String;Ljava/lang/String;[I[IZLjava/lang/String;Ljava/lang/String;ZZ[Ljava/lang/String;[Ljava/lang/String;ZZZ)I",
-        (void *) +[] [[clang::no_stack_protector]] (JNIEnv *env, jclass clazz, jlongArray _11, jint uid, jint gid, jintArray gids, jint runtime_flags, jobjectArray rlimits, jint mount_external, jstring se_info, jstring nice_name, jintArray fds_to_close, jintArray fds_to_ignore, jboolean is_child_zygote, jstring instruction_set, jstring app_data_dir, jboolean is_top_app, jboolean use_fifo_ui, jobjectArray pkg_data_info_list, jobjectArray whitelisted_data_info_list, jboolean mount_data_dirs, jboolean mount_storage_dirs, jboolean mount_sysprop_overrides) static -> jint {
+        (void *) +[] [[clang::no_stack_protector]] (JNIEnv *env, jclass clazz, jlongArray grapheneos_extra_args, jint uid, jint gid, jintArray gids, jint runtime_flags, jobjectArray rlimits, jint mount_external, jstring se_info, jstring nice_name, jintArray fds_to_close, jintArray fds_to_ignore, jboolean is_child_zygote, jstring instruction_set, jstring app_data_dir, jboolean is_top_app, jboolean use_fifo_ui, jobjectArray pkg_data_info_list, jobjectArray whitelisted_data_info_list, jboolean mount_data_dirs, jboolean mount_storage_dirs, jboolean mount_sysprop_overrides) static -> jint {
             AppSpecializeArgs_v5 args(uid, gid, gids, runtime_flags, rlimits, mount_external, se_info, nice_name, instruction_set, app_data_dir);
             args.fds_to_ignore = &fds_to_ignore;
             args.is_child_zygote = &is_child_zygote;
@@ -265,9 +265,17 @@ std::array<JNINativeMethod, 15> fork_app_methods = {{
             args.mount_storage_dirs = &mount_storage_dirs;
             args.mount_sysprop_overrides = &mount_sysprop_overrides;
             ZygiskContext ctx(env, &args);
+            if (is_grapheneos_exec_spawn_replay(env, grapheneos_extra_args, fds_to_close)) {
+                ctx.nativeForkAndSpecialize_in_place_pre();
+                jint result = reinterpret_cast<jint(*)(JNIEnv *env, jclass clazz, jlongArray grapheneos_extra_args, jint uid, jint gid, jintArray gids, jint runtime_flags, jobjectArray rlimits, jint mount_external, jstring se_info, jstring nice_name, jintArray fds_to_close, jintArray fds_to_ignore, jboolean is_child_zygote, jstring instruction_set, jstring app_data_dir, jboolean is_top_app, jboolean use_fifo_ui, jobjectArray pkg_data_info_list, jobjectArray whitelisted_data_info_list, jboolean mount_data_dirs, jboolean mount_storage_dirs, jboolean mount_sysprop_overrides)>(get_defs()->fork_app_methods[13].fnPtr)(
+                    env, clazz, grapheneos_extra_args, uid, gid, gids, runtime_flags, rlimits, mount_external, se_info, nice_name, fds_to_close, fds_to_ignore, is_child_zygote, instruction_set, app_data_dir, is_top_app, use_fifo_ui, pkg_data_info_list, whitelisted_data_info_list, mount_data_dirs, mount_storage_dirs, mount_sysprop_overrides
+                );
+                ctx.nativeForkAndSpecialize_in_place_post(result == 0);
+                return result;
+            }
             ctx.nativeForkAndSpecialize_pre();
-            reinterpret_cast<jint(*)(JNIEnv *env, jclass clazz, jlongArray _11, jint uid, jint gid, jintArray gids, jint runtime_flags, jobjectArray rlimits, jint mount_external, jstring se_info, jstring nice_name, jintArray fds_to_close, jintArray fds_to_ignore, jboolean is_child_zygote, jstring instruction_set, jstring app_data_dir, jboolean is_top_app, jboolean use_fifo_ui, jobjectArray pkg_data_info_list, jobjectArray whitelisted_data_info_list, jboolean mount_data_dirs, jboolean mount_storage_dirs, jboolean mount_sysprop_overrides)>(get_defs()->fork_app_methods[13].fnPtr)(
-                env, clazz, _11, uid, gid, gids, runtime_flags, rlimits, mount_external, se_info, nice_name, fds_to_close, fds_to_ignore, is_child_zygote, instruction_set, app_data_dir, is_top_app, use_fifo_ui, pkg_data_info_list, whitelisted_data_info_list, mount_data_dirs, mount_storage_dirs, mount_sysprop_overrides
+            reinterpret_cast<jint(*)(JNIEnv *env, jclass clazz, jlongArray grapheneos_extra_args, jint uid, jint gid, jintArray gids, jint runtime_flags, jobjectArray rlimits, jint mount_external, jstring se_info, jstring nice_name, jintArray fds_to_close, jintArray fds_to_ignore, jboolean is_child_zygote, jstring instruction_set, jstring app_data_dir, jboolean is_top_app, jboolean use_fifo_ui, jobjectArray pkg_data_info_list, jobjectArray whitelisted_data_info_list, jboolean mount_data_dirs, jboolean mount_storage_dirs, jboolean mount_sysprop_overrides)>(get_defs()->fork_app_methods[13].fnPtr)(
+                env, clazz, grapheneos_extra_args, uid, gid, gids, runtime_flags, rlimits, mount_external, se_info, nice_name, fds_to_close, fds_to_ignore, is_child_zygote, instruction_set, app_data_dir, is_top_app, use_fifo_ui, pkg_data_info_list, whitelisted_data_info_list, mount_data_dirs, mount_storage_dirs, mount_sysprop_overrides
             );
             ctx.nativeForkAndSpecialize_post();
             return ctx.pid;

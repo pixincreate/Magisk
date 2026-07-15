@@ -32,8 +32,8 @@ class Argument:
 class Anon(Argument):
     cnt = 0
 
-    def __init__(self, type: JType):
-        super().__init__(f"_{Anon.cnt}", type)
+    def __init__(self, type: JType, name=None):
+        super().__init__(name or f"_{Anon.cnt}", type)
         Anon.cnt += 1
 
 
@@ -118,6 +118,34 @@ class ForkApp(JNIHook):
         decl += ind(3) + f"ctx.{self.hook_target()}_post();"
         if self.ret.value:
             decl += ind(3) + f"return {self.ret.value};"
+        return decl
+
+
+class ForkGrapheneOsC(ForkApp):
+    def body(self, orig_fn_ptr: str):
+        decl = ""
+        decl += ind(3) + self.init_args()
+        for a in self.args:
+            if a.set_arg:
+                decl += ind(3) + f"args.{a.name} = &{a.name};"
+        decl += ind(3) + "ZygiskContext ctx(env, &args);"
+        decl += ind(3) + (
+            "if (is_grapheneos_exec_spawn_replay("
+            "env, grapheneos_extra_args, fds_to_close)) {"
+        )
+        decl += ind(4) + "ctx.nativeForkAndSpecialize_in_place_pre();"
+        decl += ind(4) + f"jint result = reinterpret_cast<{self.cpp_fn_type()})>({orig_fn_ptr})("
+        decl += ind(5) + self.arg_list_name()
+        decl += ind(4) + ");"
+        decl += ind(4) + "ctx.nativeForkAndSpecialize_in_place_post(result == 0);"
+        decl += ind(4) + "return result;"
+        decl += ind(3) + "}"
+        decl += ind(3) + "ctx.nativeForkAndSpecialize_pre();"
+        decl += ind(3) + f"reinterpret_cast<{self.cpp_fn_type()})>({orig_fn_ptr})("
+        decl += ind(4) + self.arg_list_name()
+        decl += ind(3) + ");"
+        decl += ind(3) + "ctx.nativeForkAndSpecialize_post();"
+        decl += ind(3) + "return ctx.pid;"
         return decl
 
 
@@ -467,10 +495,10 @@ fas_grapheneos_b = ForkApp(
 )
 
 # GrapheneOS C (extra args moved to the first parameter)
-fas_grapheneos_c = ForkApp(
+fas_grapheneos_c = ForkGrapheneOsC(
     "grapheneos_c",
     [
-        Anon(jlongArray),
+        Anon(jlongArray, "grapheneos_extra_args"),
         uid,
         gid,
         gids,
