@@ -1,0 +1,80 @@
+name: GrapheneOS Zygote Contract Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: grapheneos-zygote-contract-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check GrapheneOS zygote contract
+        id: monitor
+        run: |
+          set +e
+          python3 scripts/grapheneos_zygote_contract.py \
+            --out-json grapheneos_zygote_contract_current.json \
+            --report grapheneos_zygote_contract_report.md
+          status=$?
+          set -e
+          if [ "$status" = "0" ]; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          elif [ "$status" = "2" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            exit "$status"
+          fi
+
+      - name: Upload contract report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: grapheneos-zygote-contract
+          if-no-files-found: warn
+          path: |
+            grapheneos_zygote_contract_current.json
+            grapheneos_zygote_contract_report.md
+
+      - name: Sync drift issue
+        if: github.repository == 'pixincreate/Magisk'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIFT: ${{ steps.monitor.outputs.drift }}
+          MARKER: "<!-- grapheneos-zygote-contract-monitor:v1 -->"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          issue="$(gh issue list --state all --limit 1000 --json number,body,title,state,author --jq "map(select(.title == \"GrapheneOS zygote semantic contract drift\" and .author.login == \"github-actions[bot]\" and ((.body // \"\") | contains(\"$MARKER\")))) | sort_by(.number) | last | if . then [.number, .state] | @tsv else \"\" end")"
+          issue_number="${issue%%$'\t'*}"
+          issue_state="${issue#*$'\t'}"
+          if [ "$DRIFT" = "true" ]; then
+            {
+              cat grapheneos_zygote_contract_report.md
+              printf '\nWorkflow run: %s\n' "$RUN_URL"
+            } > issue_body.md
+            if [ -n "$issue_number" ]; then
+              if [ "$issue_state" = "CLOSED" ]; then
+                gh issue reopen "$issue_number"
+              fi
+              gh issue edit "$issue_number" --title "GrapheneOS zygote semantic contract drift" --body-file issue_body.md
+            else
+              gh issue create --title "GrapheneOS zygote semantic contract drift" --body-file issue_body.md
+            fi
+          elif [ -n "$issue_number" ] && [ "$issue_state" = "OPEN" ]; then
+            gh issue comment "$issue_number" --body "GrapheneOS zygote contract matches the committed baseline again. Closing from $RUN_URL."
+            gh issue close "$issue_number" --reason completed
+          fi
