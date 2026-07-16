@@ -187,7 +187,7 @@ DCL_HOOK_FUNC(static void, android_log_close) {
 // It should be safe to assume all dlclose's in libnativebridge are for zygisk_loader
 DCL_HOOK_FUNC(static int, dlclose, void *handle) {
     if (!g_hook->self_handle) {
-        ZLOGV("dlclose zygisk_loader\n");
+        ZLOGI("diag: dlclose hook fired, handle=%p\n", handle);
         g_hook->post_native_bridge_load(handle);
     }
     return 0;
@@ -368,16 +368,24 @@ void HookContext::post_native_bridge_load(void *handle) {
         return _URC_NO_REASON;
     }, &arg);
 
-    if (!arg.load_native_bridge || !arg.callbacks)
+    if (!arg.load_native_bridge || !arg.callbacks) {
+        ZLOGE("diag: post_native_bridge_load FAILED - load_native_bridge=%p callbacks=%p\n",
+              arg.load_native_bridge, arg.callbacks);
         return;
+    }
+
+    ZLOGI("diag: post_native_bridge_load OK - load_native_bridge=%p callbacks=%p\n",
+          arg.load_native_bridge, arg.callbacks);
 
     // Reload the real native bridge if necessary
     auto nb = get_prop(NBPROP);
     auto len = sizeof(ZYGISKLDR) - 1;
     if (nb.size() > len) {
+        ZLOGI("diag: reloading real native bridge: %s\n", nb.c_str() + len);
         arg.load_native_bridge(nb.c_str() + len, arg.callbacks);
     }
     runtime_callbacks = arg.callbacks;
+    ZLOGI("diag: runtime_callbacks stored = %p\n", runtime_callbacks);
 }
 
 // -----------------------------------------------------------------
@@ -421,8 +429,11 @@ void HookContext::hook_plt() {
     PLT_HOOK_REGISTER(android_runtime_dev, android_runtime_inode, strdup);
     PLT_HOOK_REGISTER_SYM(android_runtime_dev, android_runtime_inode, "__android_log_close", android_log_close);
 
-    if (!lsplt::CommitHook())
+    if (!lsplt::CommitHook()) {
         ZLOGE("plt_hook failed\n");
+    } else {
+        ZLOGI("diag: plt_hook committed successfully\n");
+    }
 
     // Remove unhooked methods
     std::erase_if(plt_backup, [](auto &t) { return *std::get<3>(t) == nullptr; });
@@ -474,9 +485,15 @@ static void register_jni_methods(JNIEnv *env, jclass clazz, JNIMethods methods) 
         if (!method.fnPtr) continue;
 
         // It's normal that the method is not found
-        if (env->RegisterNatives(clazz, &method, 1) == JNI_ERR || env->ExceptionCheck() == JNI_TRUE) {
+        jint reg_res = env->RegisterNatives(clazz, &method, 1);
+        bool has_exception = env->ExceptionCheck() == JNI_TRUE;
+        if (reg_res == JNI_ERR || has_exception) {
+            ZLOGI("diag: RegisterNatives FAILED for %s %s (ret=%d, exc=%d)\n",
+                  method.name, method.signature, reg_res, has_exception);
             env->ExceptionClear();
             method.fnPtr = nullptr;
+        } else {
+            ZLOGI("diag: RegisterNatives OK for %s %s\n", method.name, method.signature);
         }
     }
 }
@@ -485,6 +502,11 @@ int HookContext::hook_jni_methods(JNIEnv *env, jclass clazz, JNIMethods methods)
     // Backup existing methods
     auto o = get_jni_methods(env, clazz);
     const auto old_methods = span(o.first.get(), o.second);
+
+    ZLOGI("diag: hook_jni_methods old_methods count=%zu\n", o.second);
+    for (const auto &m : old_methods) {
+        ZLOGI("diag:   old: %s %s fnPtr=%p\n", m.name, m.signature, m.fnPtr);
+    }
 
     // WARNING: the signature field returned from getNativeMethods is in a non-standard format.
     // DO NOT TRY TO USE IT. This is the reason why we try to call RegisterNatives on every single
@@ -506,7 +528,7 @@ int HookContext::hook_jni_methods(JNIEnv *env, jclass clazz, JNIMethods methods)
                 for (const auto &old_method : old_methods) {
                     if (strcmp(old_method.name, new_method.name) == 0 &&
                         strcmp(old_method.signature, new_method.signature) == 0) {
-                        ZLOGV("replace %s %s %p -> %p\n",
+                        ZLOGI("diag: HOOKED %s %s %p -> %p\n",
                             method.name, method.signature, old_method.fnPtr, method.fnPtr);
                         method.fnPtr = old_method.fnPtr;
                         ++hook_count;
@@ -518,6 +540,7 @@ int HookContext::hook_jni_methods(JNIEnv *env, jclass clazz, JNIMethods methods)
         }
         next_method:
     }
+    ZLOGI("diag: hook_jni_methods hook_count=%d\n", hook_count);
     return hook_count;
 }
 
@@ -566,6 +589,8 @@ void HookContext::hook_zygote_jni() {
         ZLOGW("JNIEnv not found\n");
     }
 
+    ZLOGI("diag: hook_zygote_jni starting, runtime_callbacks=%p\n", runtime_callbacks);
+
     JNINativeMethod missing_method{};
     bool replaced_fork_app = false;
     bool replaced_specialize_app = false;
@@ -573,20 +598,27 @@ void HookContext::hook_zygote_jni() {
 
     jclass clazz = env->FindClass(kZygote);
     auto [ptr, count] = get_jni_methods(env, clazz);
+    ZLOGI("diag: Zygote native methods count=%zu\n", count);
+    for (const auto methods = span(ptr.get(), count); const auto &method : methods) {
+        ZLOGI("diag:   zygote method: %s %s\n", method.name, method.signature);
+    }
     for (const auto methods = span(ptr.get(), count); const auto &method : methods) {
         if (strcmp(method.name, kForkApp) == 0) {
+            ZLOGI("diag: matched kForkApp=%s\n", method.name);
             if (hook_jni_methods(env, clazz, fork_app_methods) == 0) {
                 missing_method = method;
                 break;
             }
             replaced_fork_app = true;
         } else if (strcmp(method.name, kSpecializeApp) == 0) {
+            ZLOGI("diag: matched kSpecializeApp=%s\n", method.name);
             if (hook_jni_methods(env, clazz, specialize_app_methods) == 0) {
                 missing_method = method;
                 break;
             }
             replaced_specialize_app = true;
         } else if (strcmp(method.name, kForkServer) == 0) {
+            ZLOGI("diag: matched kForkServer=%s\n", method.name);
             if (hook_jni_methods(env, clazz, fork_server_methods) == 0) {
                 missing_method = method;
                 break;
@@ -605,6 +637,9 @@ void HookContext::hook_zygote_jni() {
         ranges::for_each(fork_app_methods, [](auto &m) { m.fnPtr = nullptr; });
         ranges::for_each(specialize_app_methods, [](auto &m) { m.fnPtr = nullptr; });
         ranges::for_each(fork_server_methods, [](auto &m) { m.fnPtr = nullptr; });
+    } else {
+        ZLOGI("diag: hook_zygote_jni OK - fork_app=%d specialize_app=%d fork_server=%d\n",
+              replaced_fork_app, replaced_specialize_app, replaced_fork_server);
     }
 }
 
