@@ -107,19 +107,17 @@ impl ZygiskState {
         Ok(())
     }
 
-    pub fn reset(&mut self, mut restore: bool) {
+    pub fn reset(&mut self, restore: bool) {
         if restore {
             self.start_count = 1;
-        } else {
-            self.sockets = (None, None);
-            self.start_count += 1;
-            if self.start_count > 3 {
-                warn!("zygote crashed too many times, rolling-back");
-                restore = true;
-            }
+            self.set_prop();
+            return;
         }
 
-        if restore {
+        self.sockets = (None, None);
+        self.start_count += 1;
+        if self.start_count > 3 {
+            warn!("zygote crashed too many times, rolling-back");
             self.restore_prop();
         } else {
             self.set_prop();
