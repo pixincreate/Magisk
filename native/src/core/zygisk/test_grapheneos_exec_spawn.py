@@ -130,6 +130,28 @@ class GrapheneOsExecSpawnReplayTest(unittest.TestCase):
         self.assertNotIn("fork_pre();", in_place_pre)
         self.assertNotIn("old_fork()", in_place_pre)
 
+    def test_boot_complete_keeps_native_bridge_for_late_zygotes(self) -> None:
+        daemon = (ZYGISK_DIR / "daemon.rs").read_text()
+        start = daemon.index("pub fn reset(&mut self")
+        end = daemon.index("pub fn set_prop(&mut self)", start)
+        reset = daemon[start:end]
+
+        boot_complete = reset[
+            reset.index("if restore {") : reset.index("self.sockets")
+        ]
+        self.assertIn("self.set_prop();", boot_complete)
+        self.assertNotIn("self.restore_prop();", boot_complete)
+        self.assertRegex(boot_complete, r"self\.set_prop\(\);\s+return;")
+
+        crash_rollback = reset[reset.index("self.start_count += 1;") :]
+        threshold = crash_rollback.index("if self.start_count > 3 {")
+        restore = crash_rollback.index("self.restore_prop();", threshold)
+        fallback = crash_rollback.index("} else {", restore)
+        rearm = crash_rollback.index("self.set_prop();", fallback)
+        self.assertLess(threshold, restore)
+        self.assertLess(restore, fallback)
+        self.assertLess(fallback, rearm)
+
 
 if __name__ == "__main__":
     unittest.main()
