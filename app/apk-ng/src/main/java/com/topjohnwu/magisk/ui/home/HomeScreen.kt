@@ -286,10 +286,12 @@ fun HomeScreen(
                 onHideRestorePressed = viewModel::onHideRestorePressed,
             )
 
-            UninstallButton(
-                onClick = { viewModel.onDeletePressed() },
-                enabled = Info.env.isActive
-            )
+            if (!Info.isBootloaderLocked) {
+                UninstallButton(
+                    onClick = { viewModel.onDeletePressed() },
+                    enabled = Info.env.isActive
+                )
+            }
 
             Text(
                 text = stringResource(CoreR.string.home_support_title),
