@@ -1,12 +1,14 @@
 #include <sys/mman.h>
 #include <android/dlext.h>
 #include <dlfcn.h>
+#include <array>
 
 #include <lsplt.hpp>
 
 #include <base.hpp>
 
 #include "zygisk.hpp"
+#include "exec_spawn_replay.hpp"
 #include "module.hpp"
 
 using namespace std;
@@ -293,6 +295,28 @@ void ZygiskContext::sanitize_fds() {
     }
 }
 
+bool is_grapheneos_exec_spawn_replay(
+        JNIEnv *env, jlongArray grapheneos_extra_args, jintArray fds_to_close) {
+    if (grapheneos_extra_args == nullptr || fds_to_close == nullptr ||
+            env->GetArrayLength(grapheneos_extra_args) <=
+                    static_cast<jsize>(zygisk::kGrapheneOsNativeForkFlagsIndex) ||
+            env->GetArrayLength(fds_to_close) != 2) {
+        return false;
+    }
+
+    jlong native_fork_flags = 0;
+    env->GetLongArrayRegion(
+            grapheneos_extra_args,
+            static_cast<jsize>(zygisk::kGrapheneOsNativeForkFlagsIndex),
+            1,
+            &native_fork_flags);
+    std::array<jint, 2> close_fds{};
+    env->GetIntArrayRegion(
+            fds_to_close, 0, static_cast<jsize>(close_fds.size()), close_fds.data());
+    return zygisk::is_grapheneos_exec_spawn_replay_contract(
+            native_fork_flags, std::span<const int>(close_fds.data(), close_fds.size()));
+}
+
 bool ZygiskContext::exempt_fd(int fd) {
     if ((flags & POST_SPECIALIZE) || (flags & SKIP_CLOSE_LOG_PIPE))
         return true;
@@ -322,6 +346,10 @@ void ZygiskContext::fork_pre() {
     if (!is_child())
         return;
 
+    record_open_fds();
+}
+
+void ZygiskContext::record_open_fds() {
     // Record all open fds
     auto dir = xopen_dir("/proc/self/fd");
     for (dirent *entry; (entry = xreaddir(dir.get()));) {
@@ -497,4 +525,22 @@ void ZygiskContext::nativeForkAndSpecialize_post() {
         app_specialize_post();
     }
     fork_post();
+}
+
+void ZygiskContext::nativeForkAndSpecialize_in_place_pre() {
+    process = env->GetStringUTFChars(args.app->nice_name, nullptr);
+    ZLOGV("pre  forkAndSpecialize in-place [%s]\n", process);
+    flags |= APP_FORK_AND_SPECIALIZE;
+    record_open_fds();
+    app_specialize_pre();
+    sanitize_fds();
+}
+
+void ZygiskContext::nativeForkAndSpecialize_in_place_post(bool specialized) {
+    if (specialized) {
+        ZLOGV("post forkAndSpecialize in-place [%s]\n", process);
+        app_specialize_post();
+    } else {
+        env->ReleaseStringUTFChars(args.app->nice_name, process);
+    }
 }
