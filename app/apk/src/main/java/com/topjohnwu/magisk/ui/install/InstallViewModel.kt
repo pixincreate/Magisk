@@ -41,8 +41,9 @@ class InstallViewModel(
 
     val isRooted get() = Info.isRooted
     val isGooglebook get() = Info.isGooglebook
+    val restrictInstall get() = Info.restrictInstall
     val skipOptions = Info.isEmulator || (Info.isSAR && !Info.isFDE && Info.ramdisk)
-    val noSecondSlot = !isRooted || !Info.isAB || Info.isEmulator
+    val noSecondSlot get() = !isRooted || !Info.isAB || Info.isEmulator || restrictInstall
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -121,6 +122,9 @@ class InstallViewModel(
     }
 
     fun install() {
+        if (restrictInstall &&
+            (_uiState.value.method == Method.DIRECT || _uiState.value.method == Method.INACTIVE_SLOT)
+        ) return
         when (_uiState.value.method) {
             Method.PATCH -> navigateTo(Route.Flash(
                 action = Const.Value.PATCH_FILE,
