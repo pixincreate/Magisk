@@ -200,7 +200,7 @@
                         <RadioButton
                             android:id="@+id/method_direct"
                             style="@style/WidgetFoundation.RadioButton"
-                            gone="@{!viewModel.rooted}"
+                            gone="@{!viewModel.rooted || Info.isBootloaderLocked}"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="@string/direct_install" />
