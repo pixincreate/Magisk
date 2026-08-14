@@ -60,6 +60,13 @@ object Info {
             || getProperty("ro.kernel.qemu", "0") == "1"
             || getProperty("ro.boot.qemu", "0") == "1"
 
+    @JvmStatic var isBootloaderLocked: Boolean =
+        getProperty("ro.boot.vbmeta.device_state", "").let { state ->
+            if (state.isNotEmpty()) state.equals("locked", ignoreCase = true)
+            else getProperty("ro.boot.flash.locked", "0") == "1"
+        }
+        private set
+
     val isConnected = MutableLiveData(false)
 
     val showSuperUser: Boolean get() {
@@ -92,6 +99,12 @@ object Info {
                 runCatching { fastCmd("magisk -V").toInt() }.getOrDefault(-1)
             )
             Config.denyList = fastCmdResult(shell, "magisk --denylist status")
+
+            val bootParams = shell.newJob()
+                .add("cat /proc/bootconfig /proc/cmdline")
+                .to(ArrayList(), null).exec().out.joinToString(" ")
+            Regex("""androidboot\.vbmeta\.device_state[ ="]+(\w+)""")
+                .find(bootParams)?.let { isBootloaderLocked = it.groupValues[1] == "locked" }
         }
 
         val map = mutableMapOf<String, String>()
