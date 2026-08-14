@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
+import com.topjohnwu.magisk.core.Config
+import com.topjohnwu.magisk.core.Info
 import com.topjohnwu.magisk.core.utils.LocaleSetting
 import com.topjohnwu.magisk.core.utils.MediaStoreUtils
 import com.topjohnwu.magisk.ui.component.AdaptiveColumns
@@ -386,6 +388,25 @@ private fun AppSettingsSection(
             checked = uiState.randomPackageNameEnabled,
             onCheckedChange = onToggleRandomPackageName
         )
+
+        if (Info.isBootloaderLocked) {
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+
+            // Bootloader Lock Override
+            var bootloaderOverride by remember { mutableStateOf(Config.bootloaderOverride) }
+            SettingsSwitch(
+                title = stringResource(CoreR.string.settings_bootloader_override_title),
+                summary = stringResource(CoreR.string.settings_bootloader_override_description),
+                checked = bootloaderOverride,
+                onCheckedChange = {
+                    bootloaderOverride = it
+                    Config.bootloaderOverride = it
+                }
+            )
+        }
     }
 }
 
