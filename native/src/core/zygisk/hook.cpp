@@ -187,7 +187,6 @@ DCL_HOOK_FUNC(static void, android_log_close) {
 // It should be safe to assume all dlclose's in libnativebridge are for zygisk_loader
 DCL_HOOK_FUNC(static int, dlclose, void *handle) {
     if (!g_hook->self_handle) {
-        ZLOGV("dlclose zygisk_loader\n");
         g_hook->post_native_bridge_load(handle);
     }
     return 0;
@@ -368,8 +367,9 @@ void HookContext::post_native_bridge_load(void *handle) {
         return _URC_NO_REASON;
     }, &arg);
 
-    if (!arg.load_native_bridge || !arg.callbacks)
+    if (!arg.load_native_bridge || !arg.callbacks) {
         return;
+    }
 
     // Reload the real native bridge if necessary
     auto nb = get_prop(NBPROP);
@@ -421,8 +421,9 @@ void HookContext::hook_plt() {
     PLT_HOOK_REGISTER(android_runtime_dev, android_runtime_inode, strdup);
     PLT_HOOK_REGISTER_SYM(android_runtime_dev, android_runtime_inode, "__android_log_close", android_log_close);
 
-    if (!lsplt::CommitHook())
+    if (!lsplt::CommitHook()) {
         ZLOGE("plt_hook failed\n");
+    }
 
     // Remove unhooked methods
     std::erase_if(plt_backup, [](auto &t) { return *std::get<3>(t) == nullptr; });
@@ -474,7 +475,8 @@ static void register_jni_methods(JNIEnv *env, jclass clazz, JNIMethods methods) 
         if (!method.fnPtr) continue;
 
         // It's normal that the method is not found
-        if (env->RegisterNatives(clazz, &method, 1) == JNI_ERR || env->ExceptionCheck() == JNI_TRUE) {
+        if (env->RegisterNatives(clazz, &method, 1) == JNI_ERR ||
+            env->ExceptionCheck() == JNI_TRUE) {
             env->ExceptionClear();
             method.fnPtr = nullptr;
         }
@@ -506,8 +508,6 @@ int HookContext::hook_jni_methods(JNIEnv *env, jclass clazz, JNIMethods methods)
                 for (const auto &old_method : old_methods) {
                     if (strcmp(old_method.name, new_method.name) == 0 &&
                         strcmp(old_method.signature, new_method.signature) == 0) {
-                        ZLOGV("replace %s %s %p -> %p\n",
-                            method.name, method.signature, old_method.fnPtr, method.fnPtr);
                         method.fnPtr = old_method.fnPtr;
                         ++hook_count;
                         // Break 2 levels of for loop
