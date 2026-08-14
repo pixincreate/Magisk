@@ -307,6 +307,25 @@ private fun AppSettingsSection(
                 Config.randName = it
             }
         )
+
+        if (Info.isBootloaderLocked) {
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+
+            // Bootloader Lock Override
+            var bootloaderOverride by remember { mutableStateOf(Config.bootloaderOverride) }
+            SettingsSwitch(
+                title = stringResource(CoreR.string.settings_bootloader_override_title),
+                summary = stringResource(CoreR.string.settings_bootloader_override_description),
+                checked = bootloaderOverride,
+                onCheckedChange = {
+                    bootloaderOverride = it
+                    Config.bootloaderOverride = it
+                }
+            )
+        }
     }
 }
 
