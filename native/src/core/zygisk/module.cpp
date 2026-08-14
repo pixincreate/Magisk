@@ -301,7 +301,6 @@ bool is_grapheneos_exec_spawn_replay(
             env->GetArrayLength(grapheneos_extra_args) <=
                     static_cast<jsize>(zygisk::kGrapheneOsNativeForkFlagsIndex) ||
             env->GetArrayLength(fds_to_close) != 2) {
-        ZLOGI("diag: replay false invalid array shape\n");
         return false;
     }
 
@@ -314,14 +313,8 @@ bool is_grapheneos_exec_spawn_replay(
     std::array<jint, 2> close_fds{};
     env->GetIntArrayRegion(
             fds_to_close, 0, static_cast<jsize>(close_fds.size()), close_fds.data());
-    const bool replay = zygisk::is_grapheneos_exec_spawn_replay_contract(
+    return zygisk::is_grapheneos_exec_spawn_replay_contract(
             native_fork_flags, std::span<const int>(close_fds.data(), close_fds.size()));
-    ZLOGI("diag: replay %s flags=%lld fds=[%d,%d]\n",
-          replay ? "true" : "false",
-          static_cast<long long>(native_fork_flags),
-          static_cast<int>(close_fds[0]),
-          static_cast<int>(close_fds[1]));
-    return replay;
 }
 
 bool ZygiskContext::exempt_fd(int fd) {
@@ -538,7 +531,6 @@ void ZygiskContext::nativeForkAndSpecialize_in_place_pre() {
     process = env->GetStringUTFChars(args.app->nice_name, nullptr);
     ZLOGV("pre  forkAndSpecialize in-place [%s]\n", process);
     flags |= APP_FORK_AND_SPECIALIZE;
-    ZLOGI("diag: in_place_pre entry\n");
     record_open_fds();
     app_specialize_pre();
     sanitize_fds();
@@ -551,5 +543,4 @@ void ZygiskContext::nativeForkAndSpecialize_in_place_post(bool specialized) {
     } else {
         env->ReleaseStringUTFChars(args.app->nice_name, process);
     }
-    ZLOGI("diag: in_place_post specialized=%s\n", specialized ? "true" : "false");
 }
