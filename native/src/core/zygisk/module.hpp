@@ -211,6 +211,9 @@ private:
 extern ZygiskContext *g_ctx;
 extern int (*old_fork)(void);
 
+bool is_grapheneos_exec_spawn_replay(
+        JNIEnv *env, jlongArray grapheneos_extra_args, jintArray fds_to_close);
+
 enum : uint32_t {
     POST_SPECIALIZE = (1u << 0),
     APP_FORK_AND_SPECIALIZE = (1u << 1),
@@ -268,8 +271,11 @@ struct ZygiskContext {
     DCL_PRE_POST(nativeForkAndSpecialize)
     DCL_PRE_POST(nativeSpecializeAppProcess)
     DCL_PRE_POST(nativeForkSystemServer)
+    void nativeForkAndSpecialize_in_place_pre();
+    void nativeForkAndSpecialize_in_place_post(bool specialized);
 
     int get_module_info(int uid, rust::Vec<int> &fds);
+    void record_open_fds();
     void sanitize_fds();
     bool exempt_fd(int fd);
     bool can_exempt_fd() const;
