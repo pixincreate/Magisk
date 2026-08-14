@@ -253,7 +253,7 @@ fun HomeScreen(
                 title = { Text(stringResource(CoreR.string.section_home)) },
                 scrollBehavior = scrollBehavior,
                 actions = {
-                    if (Info.env.isActive) {
+                    if (Info.env.isActive && !Info.isBootloaderLocked) {
                         IconButton(onClick = { viewModel.onDeletePressed() }) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
