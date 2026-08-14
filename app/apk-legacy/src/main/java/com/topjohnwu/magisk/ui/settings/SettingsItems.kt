@@ -198,6 +198,12 @@ object RandNameToggle : BaseSettingsItem.Toggle() {
     override var value by Config::randName
 }
 
+object BootloaderOverrideToggle : BaseSettingsItem.Toggle() {
+    override val title = CoreR.string.settings_bootloader_override_title.asText()
+    override val description = CoreR.string.settings_bootloader_override_description.asText()
+    override var value by Config::bootloaderOverride
+}
+
 // --- Magisk
 
 object Magisk : BaseSettingsItem.Section() {

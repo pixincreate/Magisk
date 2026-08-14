@@ -175,7 +175,7 @@ fun InstallDialog(
                             },
                         )
 
-                        if (installVm.isRooted) {
+                        if (installVm.isRooted && !installVm.restrictInstall) {
                             SettingsArrow(
                                 title = stringResource(CoreR.string.direct_install),
                                 onClick = {

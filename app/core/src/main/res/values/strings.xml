@@ -201,6 +201,8 @@
     <string name="settings_doh_description">Workaround DNS poisoning in some nations</string>
     <string name="settings_random_name_title">Randomize output name</string>
     <string name="settings_random_name_description">Randomize the output file name of patched images and tar files to prevent detection</string>
+    <string name="settings_bootloader_override_title">Override bootloader lock check</string>
+    <string name="settings_bootloader_override_description">Show install options even though the bootloader appears to be locked. Installing on a locked bootloader bricks the device. Only enable this if you are certain the bootloader is unlocked.</string>
     <string name="multiuser_mode">Multiuser mode</string>
     <string name="settings_owner_only">Device owner only</string>
     <string name="settings_owner_manage">Device owner managed</string>
