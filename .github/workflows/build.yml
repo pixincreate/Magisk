@@ -17,6 +17,11 @@ on:
         description: Make a forced release
         required: false
         type: boolean
+      release_tag:
+        default: ""
+        description: Override release tag (e.g. v30.8.1); empty = derive from versionCode
+        required: false
+        type: string
   workflow_call:
 
 jobs:
@@ -78,17 +83,21 @@ jobs:
           if [[ "${{ inputs.make_release }}" == "true" ]]; then
             echo "Forcing release due to workflow_dispatch input."
 
-            # Get current version from gradle.properties
-            CURRENT_VERSION_CODE=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+            RELEASE_TAG="${{ inputs.release_tag }}"
 
-            if [[ -z "$CURRENT_VERSION_CODE" ]]; then
-              echo "Error: Unable to read version code from gradle.properties"
-              echo "DO_RELEASE=false" >> $GITHUB_ENV
-              exit 1
+            if [[ -z "$RELEASE_TAG" ]]; then
+              # Derive tag from versionCode when no override given
+              CURRENT_VERSION_CODE=$(grep 'magisk.versionCode=' app/gradle.properties | awk -F= '{print $2}')
+
+              if [[ -z "$CURRENT_VERSION_CODE" ]]; then
+                echo "Error: Unable to read version code from gradle.properties"
+                echo "DO_RELEASE=false" >> $GITHUB_ENV
+                exit 1
+              fi
+
+              CURRENT_VERSION=$(echo - | awk "{ printf \"%.1f\", $CURRENT_VERSION_CODE / 1000 }")
+              RELEASE_TAG="v${CURRENT_VERSION}"
             fi
-
-            CURRENT_VERSION=$(echo - | awk "{ printf \"%.1f\", $CURRENT_VERSION_CODE / 1000 }")
-            RELEASE_TAG="v${CURRENT_VERSION}"
 
             echo "Creating forced release with tag: $RELEASE_TAG (versionCode: $CURRENT_VERSION_CODE)"
             echo "DO_RELEASE=true" >> $GITHUB_ENV
