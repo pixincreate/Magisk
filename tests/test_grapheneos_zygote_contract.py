@@ -155,6 +155,61 @@ class GrapheneOsZygoteContractTest(unittest.TestCase):
             'elif [ -n "$issue_number" ] && [ "$issue_state" = "OPEN" ]; then',
             workflow,
         )
+        self.assertIn('cron: "17 4 1,15 * *"', workflow)
+        self.assertIn("Run contract regression suites", workflow)
+
+    def test_newer_branch_detection(self) -> None:
+        self.assertEqual(contract.newer_upstream_branches(["main", "17", "16", "18"]), ["18"])
+        self.assertEqual(contract.newer_upstream_branches(["main", "17"]), [])
+        self.assertEqual(contract.newer_upstream_branches(["18", "19"]), ["18", "19"])
+        self.assertEqual(contract.newer_upstream_branches([]), [])
+
+    def test_report_flags_newer_upstream_branch(self) -> None:
+        current = contract.extract_contract(contract.read_sources(SOURCES))
+        baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+
+        clean = contract.markdown_report(current, baseline, newer_branches=[])
+        alert = contract.markdown_report(current, baseline, newer_branches=["18"])
+
+        self.assertIn(f"No upstream Android branch newer than `{contract.BRANCH}` detected", clean)
+        self.assertIn("Newer upstream Android branch detected: 18", alert)
+        self.assertIn("Re-baseline required", alert)
+
+    def test_live_run_alerts_when_newer_branch_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            sources = contract.read_sources(SOURCES)
+            out_json = tmp_path / "current.json"
+            report = tmp_path / "report.md"
+            with (
+                mock.patch.object(contract, "fetch_sources", return_value=(sources, "a" * 40)),
+                mock.patch.object(contract, "check_newer_branches", return_value=["18"]),
+            ):
+                status = contract.run(None, BASELINE, out_json, report, 20.0)
+
+            self.assertEqual(status, 2)
+            self.assertIn("Newer upstream Android branch detected: 18", report.read_text(encoding="utf-8"))
+
+    def test_live_run_survives_watchdog_failure_without_masking_drift_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            sources = contract.read_sources(SOURCES)
+            out_json = tmp_path / "current.json"
+            report = tmp_path / "report.md"
+            with (
+                mock.patch.object(contract, "fetch_sources", return_value=(sources, "a" * 40)),
+                mock.patch.object(
+                    contract,
+                    "check_newer_branches",
+                    side_effect=contract.ContractError("branches api down"),
+                ),
+            ):
+                status = contract.run(None, BASELINE, out_json, report, 20.0)
+
+            self.assertEqual(status, 0)
+            body = report.read_text(encoding="utf-8")
+            self.assertIn("No semantic contract drift detected.", body)
+            self.assertNotIn("Newer upstream Android branch detected", body)
 
 
 if __name__ == "__main__":

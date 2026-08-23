@@ -13,9 +13,11 @@ from urllib.request import Request, urlopen
 REPOSITORY = "GrapheneOS/platform_frameworks_base"
 BRANCH = "17"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/commits/{BRANCH}"
+BRANCHES_URL = f"https://api.github.com/repos/{REPOSITORY}/branches"
 RAW_BASE_URL = f"https://raw.githubusercontent.com/{REPOSITORY}"
 USER_AGENT = "Magisk GrapheneOS zygote contract monitor/1"
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
+MAX_BRANCH_PAGES = 3
 SOURCE_PATHS = (
     "core/java/com/android/internal/os/ZygoteConnection.java",
     "core/java/com/android/internal/os/ZygoteExtraArgs.java",
@@ -90,6 +92,35 @@ def fetch_sources(timeout: float) -> tuple[dict[str, str], str]:
         except UnicodeDecodeError as exc:
             raise ContractError(f"failed to decode {path}: {exc}") from exc
     return sources, revision
+
+
+def newer_upstream_branches(names: list[str]) -> list[str]:
+    pinned = int(BRANCH)
+    found = [name for name in names if re.fullmatch(r"\d+", name) and int(name) > pinned]
+    return sorted(found, key=int)
+
+
+def list_remote_branch_names(timeout: float) -> list[str]:
+    names: list[str] = []
+    url: str | None = f"{BRANCHES_URL}?per_page=100"
+    for _ in range(MAX_BRANCH_PAGES):
+        if url is None:
+            break
+        request = Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                link = response.headers.get("Link", "")
+                page_names = [entry["name"] for entry in json.load(response)]
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ContractError(f"failed to list GrapheneOS branches: {exc}") from exc
+        names.extend(name for name in page_names if isinstance(name, str))
+        match = re.search(r'<([^>]+)>;\s*rel="next"', link)
+        url = match.group(1) if match else None
+    return names
+
+
+def check_newer_branches(timeout: float) -> list[str]:
+    return newer_upstream_branches(list_remote_branch_names(timeout))
 
 
 def read_sources(source_dir: Path) -> dict[str, str]:
@@ -226,7 +257,11 @@ def write_json(path: Path, contract: dict[str, object]) -> None:
     path.write_text(json.dumps(contract, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
-def markdown_report(current: dict[str, object], baseline: dict[str, object] | None) -> str:
+def markdown_report(
+    current: dict[str, object],
+    baseline: dict[str, object] | None,
+    newer_branches: list[str] | None = None,
+) -> str:
     lines = ["<!-- grapheneos-zygote-contract-monitor:v1 -->", "# GrapheneOS Zygote contract drift", ""]
     lines.append(f"Current hash: `{current['canonical_sha256']}`")
     if "source_revision" in current:
@@ -240,20 +275,39 @@ def markdown_report(current: dict[str, object], baseline: dict[str, object] | No
         else:
             lines.append("\nSemantic contract drift detected. Review `grapheneos_zygote_contract_current.json`.")
     lines.append("\nMonitored fields: JNI descriptors, extra-long-args indices/flags, replay fds sentinel, replay `processCommand(..., false, ...)`, and exec-spawn fork behavior.")
+    if newer_branches is not None:
+        if newer_branches:
+            lines.append(
+                f"\n**Newer upstream Android branch detected: {', '.join(newer_branches)}.** "
+                f"The committed baseline targets branch `{BRANCH}`. Re-baseline required: bump "
+                f"`BRANCH` in `scripts/grapheneos_zygote_contract.py`, refresh the fixtures and "
+                f"`baseline.json`, and review the new descriptors for additional JNI hook variants."
+            )
+        else:
+            lines.append(f"\nNo upstream Android branch newer than `{BRANCH}` detected.")
     return "\n".join(lines) + "\n"
 
 
 def run(source_dir: Path | None, baseline_path: Path, out_json: Path, report: Path, timeout: float) -> int:
+    newer_branches: list[str] | None = None
     if source_dir:
         sources = read_sources(source_dir)
         revision = None
     else:
         sources, revision = fetch_sources(timeout)
+        try:
+            newer_branches = check_newer_branches(timeout)
+        except ContractError:
+            # The watchdog must never mask the primary drift signal.
+            newer_branches = None
     current = extract_contract(sources, revision)
     baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else None
     write_json(out_json, current)
-    report.write_text(markdown_report(current, baseline), encoding="utf-8")
-    return 0 if baseline is not None and canonical_hash(current) == canonical_hash(baseline) else 2
+    report.write_text(markdown_report(current, baseline, newer_branches), encoding="utf-8")
+    drift = baseline is None or canonical_hash(current) != canonical_hash(baseline)
+    if drift or newer_branches:
+        return 2
+    return 0
 
 
 def main_with_args_for_test(source_dir: Path, baseline: Path, out_json: Path, report: Path) -> int:
