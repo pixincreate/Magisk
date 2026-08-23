@@ -293,4 +293,30 @@ class Environment : BaseTest {
             )
         }
     }
+
+    // -n bypasses property_service, which refuses ro.* props.
+    // Set both props to match Info.isBootloaderLocked's logic:
+    // vbmeta.device_state (checked first if non-empty) and
+    // flash.locked (fallback when vbmeta is empty).
+    @Test
+    fun setupBootloaderLocked() {
+        assertTrue(
+            "Failed to set bootloader locked state",
+            Shell.cmd(
+                "resetprop -n ro.boot.vbmeta.device_state locked",
+                "resetprop -n ro.boot.flash.locked 1"
+            ).exec().isSuccess
+        )
+    }
+
+    @Test
+    fun setupBootloaderUnlocked() {
+        assertTrue(
+            "Failed to set bootloader unlocked state",
+            Shell.cmd(
+                "resetprop -n ro.boot.vbmeta.device_state unlocked",
+                "resetprop -n ro.boot.flash.locked 0"
+            ).exec().isSuccess
+        )
+    }
 }

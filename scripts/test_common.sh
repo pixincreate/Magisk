@@ -76,6 +76,10 @@ run_tests() {
   # Run app tests
   am_instrument '.MagiskAppTest,.AdditionalTest' $app
 
+  # Test the bootloader-lock UI guard (needs su granted by MagiskAppTest,
+  # and must run before app hiding renames the package)
+  am_instrument '.BootloaderLockUiTest' $self
+
   # Test app hiding
   am_instrument '.AppMigrationTest#testAppHide' $self
 

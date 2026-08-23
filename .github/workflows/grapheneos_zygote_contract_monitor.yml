@@ -3,7 +3,8 @@ name: GrapheneOS Zygote Contract Monitor
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 4 * * 1"
+    # Twice a month (1st and 15th) at 04:17 UTC.
+    - cron: "17 4 1,15 * *"
 
 permissions:
   contents: read
@@ -48,6 +49,15 @@ jobs:
           path: |
             grapheneos_zygote_contract_current.json
             grapheneos_zygote_contract_report.md
+
+      - name: Run contract regression suites
+        if: always()
+        run: python3 -m unittest tests.test_grapheneos_bindings tests.test_grapheneos_zygote_contract -v
+
+      - name: Run zygisk behavior suite
+        if: always()
+        working-directory: native/src/core/zygisk
+        run: python3 -m unittest discover -p 'test_*.py' -v
 
       - name: Sync drift issue
         if: github.repository == 'pixincreate/Magisk'
