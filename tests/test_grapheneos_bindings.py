@@ -1,15 +1,8 @@
-"""Regression bindings between the GrapheneOS contract baseline and this repo.
+"""Bindings between the GrapheneOS contract baseline and this repo.
 
-The drift monitor (test_grapheneos_zygote_contract.py) proves the *baseline*
-still matches upstream GrapheneOS sources. This suite proves Magisk's *own*
-artifacts still implement that baseline:
-
-  1. generated JNI hook descriptors == baseline jni_descriptors
-  2. exec_spawn_replay.hpp constants == baseline Java indices / flag values
-  3. jni_hooks.hpp is freshly generated (gen_jni_hooks.py regen-diff)
-  4. the Android 17 memfd_file sepolicy rule is still present
-
-If any of these fail, Zygisk will silently stop matching GrapheneOS 17.
+The drift monitor proves the baseline still matches upstream sources;
+this suite proves Magisk's own artifacts still implement that baseline.
+If any of these fail, Zygisk silently stops matching GrapheneOS 17.
 """
 from __future__ import annotations
 

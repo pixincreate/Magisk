@@ -294,10 +294,7 @@ class Environment : BaseTest {
         }
     }
 
-    // -n bypasses property_service, which refuses ro.* props.
-    // Set both props to match Info.isBootloaderLocked's logic:
-    // vbmeta.device_state (checked first if non-empty) and
-    // flash.locked (fallback when vbmeta is empty).
+    // resetprop -n bypasses property_service, which refuses ro.* props.
     @Test
     fun setupBootloaderLocked() {
         assertTrue(

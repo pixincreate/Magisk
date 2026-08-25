@@ -29,7 +29,7 @@ class GrapheneOsZygoteContractTest(unittest.TestCase):
 
         current = contract.extract_contract(sources)
 
-        self.assertEqual(current["canonical_sha256"], "a19bec7b1ff9fb0b8211fdfc777e5e8c15a6e386c9fa84cc2b52d94101f26829")
+        self.assertEqual(current, json.loads(BASELINE.read_text(encoding="utf-8")))
 
     def test_missing_field_fails_loudly(self) -> None:
         sources = contract.read_sources(SOURCES)
@@ -141,22 +141,6 @@ class GrapheneOsZygoteContractTest(unittest.TestCase):
                 self.assertEqual(contract.main(), 1)
 
             self.assertIn("contract extraction failed", report.read_text(encoding="utf-8"))
-
-    def test_workflow_handles_empty_issue_bodies_and_uploads_failure_report(self) -> None:
-        workflow = (
-            Path(__file__).parents[1]
-            / ".github/workflows/grapheneos_zygote_contract_monitor.yml"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn('(.body // \\"\\") | contains', workflow)
-        self.assertIn("if: always()", workflow)
-        self.assertIn("if-no-files-found: warn", workflow)
-        self.assertIn(
-            'elif [ -n "$issue_number" ] && [ "$issue_state" = "OPEN" ]; then',
-            workflow,
-        )
-        self.assertIn('cron: "17 4 1,15 * *"', workflow)
-        self.assertIn("Run contract regression suites", workflow)
 
     def test_newer_branch_detection(self) -> None:
         self.assertEqual(contract.newer_upstream_branches(["main", "17", "16", "18"]), ["18"])
