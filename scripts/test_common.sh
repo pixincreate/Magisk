@@ -76,9 +76,14 @@ run_tests() {
   # Run app tests
   am_instrument '.MagiskAppTest,.AdditionalTest' $app
 
-  # Test the bootloader-lock UI guard (needs su granted by MagiskAppTest,
-  # and must run before app hiding renames the package)
-  am_instrument '.BootloaderLockUiTest' $self
+  # Test the bootloader-lock flag behind the UI guard (needs su granted by
+  # MagiskAppTest, and must run before app hiding renames the package).
+  # Info.isBootloaderLocked caches per process, so each assertion runs in a
+  # fresh instrumentation process after Environment toggles the props.
+  am_instrument '.Environment#setupBootloaderLocked' $app
+  am_instrument '.BootloaderLockTest#lockedStateIsReported' $app
+  am_instrument '.Environment#setupBootloaderUnlocked' $app
+  am_instrument '.BootloaderLockTest#unlockedStateIsReported' $app
 
   # Test app hiding
   am_instrument '.AppMigrationTest#testAppHide' $self
