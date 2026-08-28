@@ -307,6 +307,21 @@ jobs:
       - name: Stop gradle daemon
         run: ./app/gradlew --stop
 
+  host-tests:
+    name: Host tests (python)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: GrapheneOS contract suites
+        run: python3 -m unittest tests.test_grapheneos_bindings tests.test_grapheneos_zygote_contract -v
+
+      - name: Zygisk exec-spawn suite
+        working-directory: native/src/core/zygisk
+        run: python3 -m unittest discover -p 'test_*.py' -v
+
   avd-test:
     name: Test API ${{ matrix.version }} (x86_64)
     runs-on: ubuntu-24.04

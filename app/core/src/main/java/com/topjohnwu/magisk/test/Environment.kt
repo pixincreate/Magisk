@@ -293,4 +293,27 @@ class Environment : BaseTest {
             )
         }
     }
+
+    // resetprop -n bypasses property_service, which refuses ro.* props.
+    @Test
+    fun setupBootloaderLocked() {
+        assertTrue(
+            "Failed to set bootloader locked state",
+            Shell.cmd(
+                "resetprop -n ro.boot.vbmeta.device_state locked",
+                "resetprop -n ro.boot.flash.locked 1"
+            ).exec().isSuccess
+        )
+    }
+
+    @Test
+    fun setupBootloaderUnlocked() {
+        assertTrue(
+            "Failed to set bootloader unlocked state",
+            Shell.cmd(
+                "resetprop -n ro.boot.vbmeta.device_state unlocked",
+                "resetprop -n ro.boot.flash.locked 0"
+            ).exec().isSuccess
+        )
+    }
 }

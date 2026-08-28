@@ -88,6 +88,12 @@ run_tests() {
   # Run app tests
   am_instrument '.MagiskAppTest,.AdditionalTest' $app
 
+  # Each assertion needs a fresh process: Info.isBootloaderLocked caches at first read.
+  am_instrument '.Environment#setupBootloaderLocked' $app
+  am_instrument '.BootloaderLockTest#lockedStateIsReported' $app
+  am_instrument '.Environment#setupBootloaderUnlocked' $app
+  am_instrument '.BootloaderLockTest#unlockedStateIsReported' $app
+
   # Test app hiding
   am_instrument '.AppMigrationTest#testAppHide' $self
 
